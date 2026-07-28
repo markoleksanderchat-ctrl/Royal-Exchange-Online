@@ -13,17 +13,17 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(`${protocol}://${host}`),
     title: { default: "Royal Exchange — Live Crown Market", template: "%s · Royal Exchange" },
-    description: "A continuously running fictional exchange that sets the market climate for Royal Exchange prices.",
+    description: "The realm's living market ledger for chartered companies, colony goods, and Crown prices.",
     openGraph: {
       title: "Royal Exchange — Live Crown Market",
-      description: "Ten listed royal companies. One autonomous market, open around the clock.",
+      description: "The realm's living market ledger for chartered companies and colony trade.",
       type: "website",
       images: [{ url: "/og.png", width: 1200, height: 630, alt: "Royal Exchange live Crown Market" }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Royal Exchange — Live Crown Market",
-      description: "Ten listed royal companies. One autonomous market, open around the clock.",
+      description: "The realm's living market ledger for chartered companies and colony trade.",
       images: ["/og.png"],
     },
   };

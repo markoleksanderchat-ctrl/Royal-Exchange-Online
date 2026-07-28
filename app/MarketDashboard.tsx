@@ -41,7 +41,7 @@ function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: b
       const top = 14;
       const bottom = bounds.height - 18;
 
-      context.strokeStyle = "rgba(224, 207, 164, .16)";
+      context.strokeStyle = "rgba(92, 62, 31, .18)";
       context.lineWidth = 1;
       for (let line = 0; line < 4; line += 1) {
         const y = top + ((bottom - top) * line) / 3;
@@ -55,10 +55,10 @@ function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: b
         x: left + ((right - left) * index) / (points.length - 1),
         y: bottom - ((point.value - low) / range) * (bottom - top),
       }));
-      const color = positive ? "#7fc7a5" : "#d68172";
-      const fade = positive ? "rgba(70, 146, 109, .03)" : "rgba(164, 82, 69, .03)";
+      const color = positive ? "#3c7755" : "#9e493d";
+      const fade = positive ? "rgba(60, 119, 85, .03)" : "rgba(158, 73, 61, .03)";
       const gradient = context.createLinearGradient(0, top, 0, bottom);
-      gradient.addColorStop(0, positive ? "rgba(70, 146, 109, .38)" : "rgba(164, 82, 69, .34)");
+      gradient.addColorStop(0, positive ? "rgba(60, 119, 85, .28)" : "rgba(158, 73, 61, .26)");
       gradient.addColorStop(1, fade);
       context.beginPath();
       coordinates.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
@@ -132,12 +132,12 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     <main>
       <header className="masthead">
         <a className="brand" href="#top" aria-label="Royal Exchange home">
-          <span className="brand-mark" aria-hidden="true">RE</span>
-          <span><strong>Royal Exchange</strong><small>Crown Market Network</small></span>
+          <span className="brand-mark" aria-hidden="true">R</span>
+          <span><strong>Royal Exchange</strong><small>Chartered Colony Market</small></span>
         </a>
         <div className="market-clock">
           <span className="live-dot" aria-hidden="true" />
-          <span><strong>Market open</strong><small>Next tick in {seconds}s · 24/7 autonomous</small></span>
+          <span><strong>Exchange open</strong><small>Next bell in {seconds}s · trading day and night</small></span>
         </div>
       </header>
 
@@ -153,7 +153,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
       <div className="shell" id="top">
         <section className="overview" aria-labelledby="market-heading">
-          <div className="eyebrow"><span>RCX Composite</span><span>Live · UTC</span></div>
+          <div className="eyebrow"><span>Royal Crown Index · RCX</span><span>Live · Realm Standard Time</span></div>
           <div className="index-line">
             <div>
               <h1 id="market-heading">{number(snapshot.composite)}</h1>
@@ -184,18 +184,18 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
         <aside className="market-rail" aria-label="Market briefing">
           <section className="briefing-card">
-            <div className="section-label">Market bulletin</div>
+            <div className="section-label">Town Crier Bulletin</div>
             <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.tone}</span>
             <h2>{snapshot.event.title}</h2>
             <p>{snapshot.event.description}</p>
             <small>Affected: {snapshot.event.sector}</small>
           </section>
           <section className="rail-card">
-            <div className="section-label">Session</div>
+            <div className="section-label">Ledger Summary</div>
             <dl className="rail-stats">
               <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
               <div><dt>Listed companies</dt><dd>{snapshot.companies.length}</dd></div>
-              <div><dt>Price source</dt><dd>Wall-clock engine</dd></div>
+              <div><dt>Price source</dt><dd>Royal market engine</dd></div>
             </dl>
           </section>
           <section className="rail-card movers-card">
@@ -206,11 +206,11 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
         <section className="listings" aria-labelledby="listings-title">
           <div className="listings-head">
-            <div><div className="section-label">Official list</div><h2 id="listings-title">Listed companies</h2></div>
-            <label className="search"><span className="sr-only">Search companies</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search ticker, company or sector" /></label>
+            <div><div className="section-label">Merchant Registry</div><h2 id="listings-title">Chartered Companies</h2></div>
+            <label className="search"><span className="sr-only">Search companies</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search guild, charter or trade" /></label>
           </div>
           <div className="market-table" role="table" aria-label="Listed companies">
-            <div className="market-row table-header" role="row"><span>Company</span><span>Price</span><span>24h</span><span>Volume</span><span>Market link</span></div>
+            <div className="market-row table-header" role="row"><span>Chartered company</span><span>Crown price</span><span>24h</span><span>Volume</span><span>Colony trade</span></div>
             {filtered.map((company) => (
               <button className={`market-row ${selected.ticker === company.ticker ? "selected" : ""}`} role="row" key={company.ticker} onClick={() => setSelectedTicker(company.ticker)}>
                 <span className="company-cell"><b>{company.ticker}</b><span><strong>{company.name}</strong><small>{company.sector}</small></span></span>
@@ -225,9 +225,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       </div>
 
       <footer>
-        <div><strong>Royal Exchange</strong><span>Independent fictional market simulation</span></div>
-        <div><span>Public price feed</span><code>/api/market</code></div>
-        <div><span>Last market tick</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
+        <div><strong>By Royal Charter</strong><span>Serving every settlement of the realm</span></div>
+        <div><span>Open market ledger</span><code>/api/market</code></div>
+        <div><span>Last exchange bell</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
       </footer>
     </main>
   );

@@ -25,11 +25,13 @@ test("server-renders the finished Royal Exchange", async () => {
   const html = await response.text();
   assert.match(html, /<title>Royal Exchange — Live Crown Market<\/title>/i);
   assert.match(html, /Royal Exchange/);
-  assert.match(html, /RCX Composite/);
-  assert.match(html, /Crown Market Network/);
+  assert.match(html, /Royal Crown Index/);
+  assert.match(html, /Chartered Colony Market/);
+  assert.match(html, /Town Crier Bulletin/);
+  assert.match(html, /Merchant Registry/);
   assert.match(html, /\/api\/market/);
   assert.match(html, /\/og\.png/);
-  assert.doesNotMatch(html, /codex-preview|SkeletonPreview|Your site is taking shape/i);
+  assert.doesNotMatch(html, /codex-preview|SkeletonPreview|Your site is taking shape|signin-with-chatgpt/i);
 });
 
 test("publishes a complete autonomous market snapshot", async () => {
