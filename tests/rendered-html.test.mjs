@@ -29,7 +29,9 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /Market at Guildhall/);
   assert.match(html, /Market notice/);
   assert.match(html, /Daily Official List/);
-  assert.match(html, /Company of Merchant Staplers/);
+  assert.match(html, /Browne of Calais Staple/);
+  assert.match(html, /Whittington Mercery/);
+  assert.match(html, /Walworth &amp; Lovekyn Fish House/);
   assert.match(html, /\/api\/market/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|Your site is taking shape|signin-with-chatgpt/i);

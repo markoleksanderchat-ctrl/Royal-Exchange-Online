@@ -229,7 +229,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
       <footer>
         <div><strong>Royal Exchange</strong><span>Fictional market · indicative values</span><a className="api-link" href="/api/market">Public data feed</a></div>
-        <div className="sources"><span>Historical terminology:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">Livery companies</a><a href="https://www.hanse.org/en/the-medieval-hanseatic-league" target="_blank" rel="noreferrer">Hanseatic trade</a></div>
+        <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
         <div><span>As of</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
       </footer>
     </main>
