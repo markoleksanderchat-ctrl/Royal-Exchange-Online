@@ -45,7 +45,7 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(market.exchange, "Royal Exchange");
   assert.equal(market.status, "OPEN");
   assert.equal(market.mode, "autonomous-wall-clock");
-  assert.equal(market.companies.length, 10);
+  assert.equal(market.companies.length, 38);
   assert.ok(market.composite > 0);
   assert.ok(market.totalVolume > 0);
   assert.ok(Date.parse(market.nextUpdateAt) > Date.parse(market.asOf));
@@ -56,6 +56,10 @@ test("publishes a complete autonomous market snapshot", async () => {
     assert.ok(company.previousClose > 0);
     assert.equal(company.history.length, 49);
   }
+  assert.ok(market.companies.some((company) => company.influence.includes("Redstone")));
+  assert.ok(market.companies.some((company) => company.influence.includes("Nether")));
+  assert.ok(market.companies.some((company) => company.influence.toLowerCase().includes("music discs")));
+  assert.equal(new Set(market.companies.map((company) => company.ticker)).size, 38);
 });
 
 test("removes starter assets and packages production metadata", async () => {

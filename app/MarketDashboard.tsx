@@ -124,7 +124,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return snapshot.companies;
-    return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector}`.toLowerCase().includes(needle));
+    return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector} ${company.influence}`.toLowerCase().includes(needle));
   }, [query, snapshot.companies]);
   const leaders = [...snapshot.companies].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
 
@@ -197,6 +197,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             <dl className="rail-stats">
               <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
               <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
+              <div><dt>Item coverage</dt><dd>All vanilla families</dd></div>
               <div><dt>Price basis</dt><dd>Indicative</dd></div>
             </dl>
           </section>
@@ -209,7 +210,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         <section className="listings" aria-labelledby="listings-title">
           <div className="listings-head">
             <div><div className="section-label">Daily Official List</div><h2 id="listings-title">Guilds and Companies</h2></div>
-            <label className="search"><span className="sr-only">Search issuers</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search issuer or trade" /></label>
+            <label className="search"><span className="sr-only">Search issuers and items</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search issuer or vanilla item" /></label>
           </div>
           <div className="market-table" role="table" aria-label="Listed companies">
             <div className="market-row table-header" role="row"><span>Issuer</span><span>Last</span><span>Change</span><span>Volume</span><span>Principal trade</span></div>
