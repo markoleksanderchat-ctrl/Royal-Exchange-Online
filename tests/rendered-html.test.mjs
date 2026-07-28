@@ -25,10 +25,11 @@ test("server-renders the finished Royal Exchange", async () => {
   const html = await response.text();
   assert.match(html, /<title>Royal Exchange — Live Crown Market<\/title>/i);
   assert.match(html, /Royal Exchange/);
-  assert.match(html, /Royal Crown Index/);
-  assert.match(html, /Chartered Colony Market/);
-  assert.match(html, /Town Crier Bulletin/);
-  assert.match(html, /Merchant Registry/);
+  assert.match(html, /Royal Exchange Composite/);
+  assert.match(html, /Market at Guildhall/);
+  assert.match(html, /Market notice/);
+  assert.match(html, /Daily Official List/);
+  assert.match(html, /Company of Merchant Staplers/);
   assert.match(html, /\/api\/market/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|Your site is taking shape|signin-with-chatgpt/i);
@@ -51,6 +52,8 @@ test("publishes a complete autonomous market snapshot", async () => {
   for (const company of market.companies) {
     assert.match(company.ticker, /^[A-Z]{3,4}$/);
     assert.ok(company.price > 0);
+    assert.ok(company.open > 0);
+    assert.ok(company.previousClose > 0);
     assert.equal(company.history.length, 49);
   }
 });

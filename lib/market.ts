@@ -9,6 +9,8 @@ export type ListedCompany = {
   sector: string;
   influence: string;
   price: number;
+  open: number;
+  previousClose: number;
   change: number;
   changePercent: number;
   volume: number;
@@ -60,25 +62,25 @@ const HISTORY_POINTS = 49;
 const DAY = 24 * 60 * MINUTE;
 
 const COMPANIES: CompanyDefinition[] = [
-  { ticker: "CRWN", name: "Crown Ironworks", sector: "Metals", influence: "Iron, anvils & tools", base: 84.2, volatility: 0.052, weight: 1.2, phase: 0.3 },
-  { ticker: "AURM", name: "Auric Mint", sector: "Precious Metals", influence: "Gold & gilded goods", base: 126.4, volatility: 0.041, weight: 0.95, phase: 1.2 },
-  { ticker: "CPFR", name: "Copperline Foundry", sector: "Industry", influence: "Copper & fittings", base: 57.8, volatility: 0.061, weight: 1.05, phase: 2.4 },
-  { ticker: "RDS", name: "Redstone Dynamics", sector: "Engineering", influence: "Redstone components", base: 112.6, volatility: 0.082, weight: 1.25, phase: 3.1 },
-  { ticker: "VGRN", name: "Verdant Granaries", sector: "Agriculture", influence: "Food, crops & livestock", base: 43.7, volatility: 0.034, weight: 1.1, phase: 4.4 },
-  { ticker: "NWT", name: "Northwood Timber", sector: "Materials", influence: "Logs, planks & paper", base: 68.3, volatility: 0.044, weight: 0.9, phase: 5.2 },
-  { ticker: "MSON", name: "Masonry Guild", sector: "Construction", influence: "Stone, brick & glass", base: 76.9, volatility: 0.038, weight: 1.0, phase: 2.0 },
-  { ticker: "EMBR", name: "Ember Fuel Cooperative", sector: "Energy", influence: "Coal, fuel & smelting", base: 91.5, volatility: 0.072, weight: 1.1, phase: 0.8 },
-  { ticker: "AZUR", name: "Azure Holdings", sector: "Arcane Materials", influence: "Lapis, crystal & enchantment", base: 104.8, volatility: 0.088, weight: 0.8, phase: 3.8 },
-  { ticker: "RARM", name: "Royal Armory", sector: "Defense", influence: "Weapons, armor & arrows", base: 98.1, volatility: 0.058, weight: 1.0, phase: 5.8 },
+  { ticker: "STPL", name: "Company of Merchant Staplers", sector: "Staple Trade", influence: "Wool, skins, lead & tin", base: 84.2, volatility: 0.052, weight: 1.2, phase: 0.3 },
+  { ticker: "MRCR", name: "Fellowship of Mercers", sector: "Textiles", influence: "Fine cloth & imported silk", base: 126.4, volatility: 0.041, weight: 0.95, phase: 1.2 },
+  { ticker: "PEPR", name: "Guild of Pepperers", sector: "Provisions", influence: "Spices, grain & preserved goods", base: 57.8, volatility: 0.061, weight: 1.05, phase: 2.4 },
+  { ticker: "FISH", name: "Fraternity of Fishmongers", sector: "Victuals", influence: "Fish, salt & river trade", base: 112.6, volatility: 0.082, weight: 1.25, phase: 3.1 },
+  { ticker: "IRON", name: "Company of Ironmongers", sector: "Metals", influence: "Iron, tools & armour", base: 43.7, volatility: 0.034, weight: 1.1, phase: 4.4 },
+  { ticker: "GDSM", name: "Mistery of Goldsmiths", sector: "Bullion", influence: "Gold, silver & gems", base: 68.3, volatility: 0.044, weight: 0.9, phase: 5.2 },
+  { ticker: "WAXC", name: "Fellowship of Wax Chandlers", sector: "Lighting", influence: "Beeswax & candles", base: 76.9, volatility: 0.038, weight: 1.0, phase: 2.0 },
+  { ticker: "SKIN", name: "Company of Skinners", sector: "Peltry", influence: "Furs, hides & leather", base: 91.5, volatility: 0.072, weight: 1.1, phase: 0.8 },
+  { ticker: "CORD", name: "Mistery of Cordwainers", sector: "Leatherwork", influence: "Fine shoes & worked leather", base: 104.8, volatility: 0.088, weight: 0.8, phase: 3.8 },
+  { ticker: "MSON", name: "Masons' Company", sector: "Building", influence: "Stone, brick & lime", base: 98.1, volatility: 0.058, weight: 1.0, phase: 5.8 },
 ];
 
 const EVENTS: Array<Omit<MarketEvent, "sector"> & { sectors: string[]; direction: number }> = [
-  { title: "Foundry orders strengthen", description: "A new round of civic works is lifting industrial demand.", tone: "positive", sectors: ["Metals", "Industry", "Construction"], direction: 1 },
-  { title: "Granaries report full stores", description: "Strong reserves are easing pressure across agricultural contracts.", tone: "negative", sectors: ["Agriculture"], direction: -1 },
-  { title: "Arcane survey returns promising", description: "Fresh deposits have renewed interest in enchanted materials.", tone: "positive", sectors: ["Arcane Materials", "Engineering"], direction: 1 },
-  { title: "Caravan routes disrupted", description: "Longer delivery times are weighing on timber and building supply.", tone: "negative", sectors: ["Materials", "Construction"], direction: -1 },
-  { title: "Border procurement expands", description: "Quartermasters have increased orders for defensive equipment.", tone: "positive", sectors: ["Defense", "Metals"], direction: 1 },
-  { title: "Energy inventories normalize", description: "Fuel reserves have returned to their seasonal range.", tone: "neutral", sectors: ["Energy"], direction: 0 },
+  { title: "Wool receipts rise at the staple", description: "A larger consignment has cleared inspection, lifting turnover in staple wares.", tone: "positive", sectors: ["Staple Trade", "Textiles"], direction: 1 },
+  { title: "Pepper convoy reaches the quay", description: "Fresh spice and grain cargoes have eased prices among the victualling trades.", tone: "negative", sectors: ["Provisions", "Victuals"], direction: -1 },
+  { title: "Assay reports firmer bullion", description: "The wardens report sound weight and fineness in the latest plate and coin.", tone: "positive", sectors: ["Bullion"], direction: 1 },
+  { title: "Road tolls delay building stone", description: "Carters report slower passage and higher charges on heavy wares.", tone: "negative", sectors: ["Building", "Metals"], direction: -1 },
+  { title: "Guildhall issues new work orders", description: "Public works contracts are supporting demand for iron, leather and masonry.", tone: "positive", sectors: ["Metals", "Leatherwork", "Building"], direction: 1 },
+  { title: "Wax supply holds steady", description: "Chandlers report sufficient stores for the present market period.", tone: "neutral", sectors: ["Lighting"], direction: 0 },
 ];
 
 function hash(value: number): number {
@@ -114,6 +116,9 @@ function history(definition: CompanyDefinition, time: number): MarketHistoryPoin
 function companySnapshot(definition: CompanyDefinition, time: number): ListedCompany {
   const price = companyPrice(definition, time);
   const previous = companyPrice(definition, time - DAY);
+  const date = new Date(time);
+  const dayOpen = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const open = companyPrice(definition, dayOpen);
   const points = history(definition, time);
   const values = points.map((point) => point.value);
   const change = Number((price - previous).toFixed(2));
@@ -126,6 +131,8 @@ function companySnapshot(definition: CompanyDefinition, time: number): ListedCom
     sector: definition.sector,
     influence: definition.influence,
     price,
+    open,
+    previousClose: previous,
     change,
     changePercent,
     volume,

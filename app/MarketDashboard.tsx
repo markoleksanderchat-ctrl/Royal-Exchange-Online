@@ -97,7 +97,7 @@ function Move({ value }: { value: number }) {
 
 export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSnapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [selectedTicker, setSelectedTicker] = useState("CRWN");
+  const [selectedTicker, setSelectedTicker] = useState("STPL");
   const [seconds, setSeconds] = useState(60);
   const [query, setQuery] = useState("");
 
@@ -126,18 +126,18 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     if (!needle) return snapshot.companies;
     return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector}`.toLowerCase().includes(needle));
   }, [query, snapshot.companies]);
-  const leaders = [...snapshot.companies].sort((a, b) => b.changePercent - a.changePercent);
+  const leaders = [...snapshot.companies].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
 
   return (
     <main>
       <header className="masthead">
         <a className="brand" href="#top" aria-label="Royal Exchange home">
-          <span className="brand-mark" aria-hidden="true">R</span>
-          <span><strong>Royal Exchange</strong><small>Chartered Colony Market</small></span>
+          <span className="brand-mark" aria-hidden="true">RE</span>
+          <span><strong>Royal Exchange</strong><small>Market at Guildhall</small></span>
         </a>
         <div className="market-clock">
           <span className="live-dot" aria-hidden="true" />
-          <span><strong>Exchange open</strong><small>Next bell in {seconds}s · trading day and night</small></span>
+          <span><strong>Market open</strong><small>Indicative prices · refresh in {seconds}s</small></span>
         </div>
       </header>
 
@@ -153,7 +153,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
       <div className="shell" id="top">
         <section className="overview" aria-labelledby="market-heading">
-          <div className="eyebrow"><span>Royal Crown Index · RCX</span><span>Live · Realm Standard Time</span></div>
+          <div className="eyebrow"><span>Royal Exchange Composite · RXC</span><span>Continuous session</span></div>
           <div className="index-line">
             <div>
               <h1 id="market-heading">{number(snapshot.composite)}</h1>
@@ -164,6 +164,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             <div className="breadth" aria-label="Market breadth">
               <span><b>{snapshot.advancing}</b> advancing</span>
               <span><b>{snapshot.declining}</b> declining</span>
+              <span><b>{snapshot.unchanged}</b> unchanged</span>
             </div>
           </div>
 
@@ -175,42 +176,43 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             <Chart points={selected.history} positive={selected.change >= 0} />
             <div className="chart-labels"><span>24 hours ago</span><span>Now</span></div>
             <dl className="instrument-stats">
-              <div><dt>Day range</dt><dd>{number(selected.low)}–{number(selected.high)}</dd></div>
+              <div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div>
+              <div><dt>Session open</dt><dd>{number(selected.open)}</dd></div>
+              <div><dt>High / low</dt><dd>{number(selected.high)} / {number(selected.low)}</dd></div>
               <div><dt>Volume</dt><dd>{compact(selected.volume)}</dd></div>
-              <div><dt>Item influence</dt><dd>{selected.influence}</dd></div>
             </dl>
           </div>
         </section>
 
         <aside className="market-rail" aria-label="Market briefing">
           <section className="briefing-card">
-            <div className="section-label">Town Crier Bulletin</div>
-            <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.tone}</span>
+            <div className="section-label">Market notice</div>
+            <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.tone === "positive" ? "Supportive" : snapshot.event.tone === "negative" ? "Adverse" : "Neutral"}</span>
             <h2>{snapshot.event.title}</h2>
             <p>{snapshot.event.description}</p>
             <small>Affected: {snapshot.event.sector}</small>
           </section>
           <section className="rail-card">
-            <div className="section-label">Ledger Summary</div>
+            <div className="section-label">Market summary</div>
             <dl className="rail-stats">
               <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
-              <div><dt>Listed companies</dt><dd>{snapshot.companies.length}</dd></div>
-              <div><dt>Price source</dt><dd>Royal market engine</dd></div>
+              <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
+              <div><dt>Price basis</dt><dd>Indicative</dd></div>
             </dl>
           </section>
           <section className="rail-card movers-card">
-            <div className="section-label">Market movers</div>
+            <div className="section-label">Largest moves</div>
             {leaders.slice(0, 3).map((company) => <button key={company.ticker} onClick={() => setSelectedTicker(company.ticker)}><span><b>{company.ticker}</b><small>{company.name}</small></span><Move value={company.changePercent} /></button>)}
           </section>
         </aside>
 
         <section className="listings" aria-labelledby="listings-title">
           <div className="listings-head">
-            <div><div className="section-label">Merchant Registry</div><h2 id="listings-title">Chartered Companies</h2></div>
-            <label className="search"><span className="sr-only">Search companies</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search guild, charter or trade" /></label>
+            <div><div className="section-label">Daily Official List</div><h2 id="listings-title">Guilds and Companies</h2></div>
+            <label className="search"><span className="sr-only">Search issuers</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search issuer or trade" /></label>
           </div>
           <div className="market-table" role="table" aria-label="Listed companies">
-            <div className="market-row table-header" role="row"><span>Chartered company</span><span>Crown price</span><span>24h</span><span>Volume</span><span>Colony trade</span></div>
+            <div className="market-row table-header" role="row"><span>Issuer</span><span>Last</span><span>Change</span><span>Volume</span><span>Principal trade</span></div>
             {filtered.map((company) => (
               <button className={`market-row ${selected.ticker === company.ticker ? "selected" : ""}`} role="row" key={company.ticker} onClick={() => setSelectedTicker(company.ticker)}>
                 <span className="company-cell"><b>{company.ticker}</b><span><strong>{company.name}</strong><small>{company.sector}</small></span></span>
@@ -225,9 +227,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       </div>
 
       <footer>
-        <div><strong>By Royal Charter</strong><span>Serving every settlement of the realm</span></div>
-        <div><span>Open market ledger</span><code>/api/market</code></div>
-        <div><span>Last exchange bell</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
+        <div><strong>Royal Exchange</strong><span>Fictional market · indicative values</span><a className="api-link" href="/api/market">Public data feed</a></div>
+        <div className="sources"><span>Historical terminology:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">Livery companies</a><a href="https://www.hanse.org/en/the-medieval-hanseatic-league" target="_blank" rel="noreferrer">Hanseatic trade</a></div>
+        <div><span>As of</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
       </footer>
     </main>
   );
