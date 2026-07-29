@@ -65,14 +65,18 @@ test("publishes a complete autonomous market snapshot", async () => {
 });
 
 test("removes starter assets and packages production metadata", async () => {
-  const [packageJson, hosting, layout, socialCard] = await Promise.all([
+  const [packageJson, hosting, layout, styles, socialCard] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
   assert.doesNotMatch(packageJson, /react-loading-skeleton|site-creator-vinext-starter/);
   assert.doesNotMatch(layout, /codex-preview|Starter Project|favicon\.svg/);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.index-line \{ display: grid;/);
+  assert.match(styles, /\.market-rail \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 430px\)[\s\S]*?\.focus-heading \{ display: grid;/);
   assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: null, r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
