@@ -30,6 +30,10 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /Simulated market notice/);
   assert.match(html, /Simulation live/);
   assert.match(html, /Daily Official List/);
+  assert.match(html, /Merchant(?:’|&rsquo;)s Price Book/);
+  assert.match(html, /Personal Merchant(?:’|&rsquo;)s Ledger/);
+  assert.match(html, /Read company charter/);
+  assert.match(html, /Pinned only on this device/);
   assert.match(html, /Browne of Calais Staple/);
   assert.match(html, /Whittington Mercery/);
   assert.match(html, /Walworth &amp; Lovekyn Fish House/);
@@ -72,11 +76,13 @@ test("publishes a complete autonomous market snapshot", async () => {
 });
 
 test("removes starter assets and packages production metadata", async () => {
-  const [packageJson, hosting, layout, styles, socialCard] = await Promise.all([
+  const [packageJson, hosting, layout, styles, dashboard, records, socialCard] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/MarketDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/market-records.ts", import.meta.url), "utf8"),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
   assert.doesNotMatch(packageJson, /react-loading-skeleton|site-creator-vinext-starter/);
@@ -84,6 +90,10 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.index-line \{ display: grid;/);
   assert.match(styles, /\.market-rail \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@media \(max-width: 430px\)[\s\S]*?\.focus-heading \{ display: grid;/);
+  assert.match(dashboard, /royal-exchange-merchant-ledger-v1/);
+  assert.match(dashboard, /Fictional market charter/);
+  assert.match(dashboard, /Nothing here is sent to Minecraft or the public exchange/);
+  assert.match(records, /CHARTER_SEATS/);
   assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

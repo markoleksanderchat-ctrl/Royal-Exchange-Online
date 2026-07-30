@@ -109,6 +109,21 @@ a { color: inherit; text-decoration: none; }
 .market-chart { display: block; width: 100%; height: 270px; margin-top: 18px; }
 .chart-recording { display: grid; place-items: center; border-block: 1px solid var(--rule); color: #675438; font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .chart-labels { display: flex; justify-content: space-between; color: #675438; font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 650; text-transform: uppercase; }
+.focus-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+.action-button {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid #6e451b;
+  background: #4a2f1c;
+  color: var(--parchment-light);
+  cursor: pointer;
+  font: 700 10px var(--font-mono), monospace;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.action-button:hover, .action-button:focus-visible { background: #65421f; outline: 2px solid rgba(154,117,56,.28); outline-offset: 2px; }
+.action-button.secondary { background: transparent; color: #573c1d; }
+.action-button.secondary:hover, .action-button.secondary:focus-visible { background: rgba(114,75,29,.08); }
 .instrument-stats { margin: 18px -28px -20px; border-top: 1px solid var(--rule); display: grid; grid-template-columns: repeat(4, 1fr); }
 .instrument-stats div { padding: 17px 20px; border-right: 1px solid var(--rule); min-width: 0; }
 .instrument-stats div:last-child { border: 0; }
@@ -137,6 +152,38 @@ a { color: inherit; text-decoration: none; }
 .movers-card button b { font-family: var(--font-mono), monospace; font-size: 11px; }
 .movers-card button small { color: #604e35; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 
+.exchange-tools { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 22px; margin-top: 22px; }
+.tool-card { min-width: 0; padding: 24px 26px; background: var(--parchment-light); border: 1px solid #afa38e; }
+.tool-card .section-label { display: block; margin-bottom: 8px; }
+.tool-card h2 { margin: 0; color: #2a1d13; font-size: 25px; }
+.tool-intro { max-width: 720px; margin: 8px 0 18px; color: #5c4b35; font-size: 13px; line-height: 1.5; }
+.tool-search input { width: 100%; height: 43px; padding: 0 13px; border: 1px solid #9a784c; border-radius: 0; outline: none; background: rgba(255,248,224,.55); color: var(--ink); font-size: 13px; }
+.tool-search input:focus { border-color: #6d4718; box-shadow: 0 0 0 2px rgba(133,87,27,.14); }
+.suggestion-row { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 17px; }
+.suggestion-row button { padding: 5px 8px; border: 1px solid #b29a75; background: transparent; color: #664719; cursor: pointer; font: 700 9px var(--font-mono), monospace; text-transform: uppercase; }
+.suggestion-row button:hover, .suggestion-row button:focus-visible { background: rgba(154,117,56,.12); outline: none; }
+.price-book-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+.price-book-entry { min-width: 0; min-height: 112px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 14px; align-content: start; padding: 14px; border: 0; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: transparent; cursor: pointer; text-align: left; }
+.price-book-entry:hover, .price-book-entry:focus-visible { background: rgba(114,75,29,.07); outline: none; }
+.price-book-entry > span:first-child { display: grid; gap: 4px; min-width: 0; }
+.price-book-entry > span:first-child b { color: #7a4f16; font: 700 10px var(--font-mono), monospace; }
+.price-book-entry > span:first-child strong { overflow-wrap: anywhere; font-size: 13px; }
+.price-book-entry > small { grid-column: 1 / -1; color: #5f503b; font-size: 10px; line-height: 1.4; }
+.price-book-quote { display: grid; justify-items: end; gap: 3px; text-align: right; }
+.price-book-quote small { color: #78674d; font: 700 8px var(--font-sans), sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+.price-book-quote b { font: 700 11px var(--font-mono), monospace; white-space: nowrap; }
+.ledger-add { width: 100%; margin-bottom: 12px; }
+.ledger-list { border-top: 1px solid var(--rule); }
+.ledger-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--rule); }
+.ledger-entry > button:first-child { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 8px 13px 0; border: 0; background: transparent; cursor: pointer; text-align: left; }
+.ledger-entry > button:first-child:hover strong, .ledger-entry > button:first-child:focus-visible strong { color: #7a4f16; }
+.ledger-entry > button:first-child span { display: grid; gap: 3px; min-width: 0; }
+.ledger-entry > button:first-child span:last-child { justify-items: end; }
+.ledger-entry b { font: 700 10px var(--font-mono), monospace; }
+.ledger-entry strong { overflow-wrap: anywhere; font-size: 12px; }
+.ledger-remove { align-self: center; padding: 6px; border: 0; background: transparent; color: #875044; cursor: pointer; font: 700 8px var(--font-mono), monospace; text-transform: uppercase; }
+.empty-note { margin: 0; padding: 18px 2px; color: #6d5d46; font-size: 12px; line-height: 1.5; }
+
 .listings { grid-column: 1 / -1; margin-top: 22px; position: relative; }
 .listings-head { display: flex; align-items: end; justify-content: space-between; gap: 28px; padding: 24px 26px; border-bottom: 1px solid var(--rule); position: relative; z-index: 1; }
 .listings-head .section-label { display: block; margin-bottom: 7px; }
@@ -160,6 +207,24 @@ button.market-row.selected { box-shadow: inset 4px 0 #774a19; }
 .move { font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 700; }
 .influence-cell { color: #56462f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+.charter-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 28px; overflow-y: auto; background: rgba(15,13,10,.82); }
+.charter-sheet { width: min(760px, 100%); max-height: calc(100vh - 56px); overflow-y: auto; position: relative; padding: 38px; color: var(--ink); background: var(--parchment-light); border: 1px solid #725633; box-shadow: 0 22px 70px rgba(0,0,0,.5), inset 0 0 0 7px var(--parchment-light), inset 0 0 0 8px #b79a67; }
+.charter-close { position: absolute; top: 18px; right: 18px; padding: 5px 7px; border: 0; border-bottom: 1px solid #8a673a; background: transparent; color: #63451d; cursor: pointer; font: 700 9px var(--font-mono), monospace; text-transform: uppercase; }
+.charter-kicker { padding-right: 70px; color: #75501d; font: 700 10px var(--font-mono), monospace; letter-spacing: .08em; text-transform: uppercase; }
+.charter-heading { display: flex; align-items: center; gap: 18px; margin: 24px 0 20px; padding: 20px 0; border-block: 1px solid var(--rule); }
+.charter-seal { width: 70px; height: 70px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: #ead9b3; background: #6f332d; border: 3px double #b78e53; box-shadow: 0 0 0 4px rgba(111,51,45,.12); font: 700 17px var(--font-mono), monospace; }
+.charter-heading > div { min-width: 0; }
+.charter-heading span { color: #6e5434; font: 700 10px var(--font-mono), monospace; letter-spacing: .08em; text-transform: uppercase; }
+.charter-heading h2 { margin: 5px 0 4px; color: #2a1d13; font-size: clamp(27px, 5vw, 40px); line-height: 1; }
+.charter-heading p { margin: 0; color: #66533b; font-size: 13px; font-style: italic; }
+.charter-preamble { margin: 0 0 22px; color: #4e402f; font-size: 16px; line-height: 1.55; }
+.charter-facts { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+.charter-facts div { min-width: 0; padding: 14px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.charter-facts dt { color: #755b38; font: 700 9px var(--font-mono), monospace; letter-spacing: .08em; text-transform: uppercase; }
+.charter-facts dd { margin: 6px 0 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.4; }
+.charter-sheet blockquote { margin: 22px 0; padding: 15px 18px; border-left: 3px solid #8c693b; color: #58472f; background: rgba(154,117,56,.08); font-size: 14px; line-height: 1.55; font-style: italic; }
+.charter-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+
 footer { min-height: 105px; width: min(1460px, 92vw); margin: 0 auto; border-top: 1px solid var(--dark-rule); display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 40px; color: #c8b996; font-size: 11px; line-height: 1.4; }
 footer > div { display: grid; gap: 4px; }
 footer > div:not(:first-child) { text-align: right; }
@@ -174,6 +239,7 @@ footer code, footer time { color: #e3d3ad; font-family: var(--font-mono), monosp
   .shell { grid-template-columns: 1fr; padding: 28px; }
   .market-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-top: 0; }
   .briefing-card { grid-column: 1 / -1; }
+  .exchange-tools { grid-template-columns: 1fr; }
   .listings { grid-column: 1; }
   .market-row { grid-template-columns: minmax(200px, 1.2fr) .6fr .5fr .6fr; }
   .market-row > :last-child { display: none; }
@@ -207,6 +273,13 @@ footer code, footer time { color: #e3d3ad; font-family: var(--font-mono), monosp
   .instrument-stats div:nth-child(n+3) { border-top: 1px solid var(--rule); }
   .market-rail { grid-template-columns: minmax(0, 1fr); }
   .briefing-card { grid-column: auto; }
+  .tool-card { padding: 20px; }
+  .price-book-results { grid-template-columns: 1fr; }
+  .charter-backdrop { padding: 0; place-items: stretch; }
+  .charter-sheet { width: 100%; max-height: 100vh; min-height: 100vh; padding: 28px 22px; border: 0; }
+  .charter-heading { align-items: flex-start; }
+  .charter-seal { width: 54px; height: 54px; }
+  .charter-facts { grid-template-columns: 1fr; }
   .listings-head { align-items: stretch; flex-direction: column; padding: 20px; }
   .search input { width: 100%; }
   .table-header { display: none; }

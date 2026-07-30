@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MarketHistoryPoint, MarketSnapshot } from "../lib/market";
+import type { ListedCompany, MarketHistoryPoint, MarketSnapshot } from "../lib/market";
+import { charterRecord, PRICE_BOOK_SUGGESTIONS, standingFor } from "./market-records";
+
+const LEDGER_KEY = "royal-exchange-merchant-ledger-v1";
 
 function number(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
@@ -13,6 +16,14 @@ function compact(value: number) {
 
 function signed(value: number, suffix = "") {
   return `${value >= 0 ? "+" : ""}${number(value)}${suffix}`;
+}
+
+function utcDate(value: string) {
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(value));
+}
+
+function utcTime(value: string) {
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }).format(new Date(value));
 }
 
 function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: boolean }) {
@@ -103,6 +114,10 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const [selectedTicker, setSelectedTicker] = useState("STPL");
   const [seconds, setSeconds] = useState(60);
   const [query, setQuery] = useState("");
+  const [wareQuery, setWareQuery] = useState("");
+  const [ledgerTickers, setLedgerTickers] = useState<string[]>([]);
+  const [ledgerReady, setLedgerReady] = useState(false);
+  const [charterTicker, setCharterTicker] = useState<string | null>(null);
 
   useEffect(() => {
     const refresh = async () => {
@@ -124,6 +139,33 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     };
   }, [snapshot.nextUpdateAt]);
 
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(LEDGER_KEY) ?? "[]");
+        if (Array.isArray(saved)) setLedgerTickers(saved.filter((value): value is string => typeof value === "string"));
+      } catch {
+        // A damaged local preference should never prevent the public market loading.
+      }
+      setLedgerReady(true);
+    }, 0);
+    return () => window.clearTimeout(loadTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!ledgerReady) return;
+    window.localStorage.setItem(LEDGER_KEY, JSON.stringify(ledgerTickers));
+  }, [ledgerReady, ledgerTickers]);
+
+  useEffect(() => {
+    if (!charterTicker) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCharterTicker(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [charterTicker]);
+
   const selected = snapshot.companies.find((company) => company.ticker === selectedTicker) ?? snapshot.companies[0];
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -131,6 +173,22 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector} ${company.influence}`.toLowerCase().includes(needle));
   }, [query, snapshot.companies]);
   const leaders = [...snapshot.companies].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+  const priceBookResults = useMemo(() => {
+    const needle = wareQuery.trim().toLowerCase();
+    if (!needle) return snapshot.companies.slice(0, 6);
+    return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector} ${company.influence}`.toLowerCase().includes(needle)).slice(0, 8);
+  }, [snapshot.companies, wareQuery]);
+  const ledgerCompanies = ledgerTickers.map((ticker) => snapshot.companies.find((company) => company.ticker === ticker)).filter((company): company is ListedCompany => Boolean(company));
+  const charterCompany = charterTicker ? snapshot.companies.find((company) => company.ticker === charterTicker) ?? null : null;
+
+  const toggleLedger = (ticker: string) => {
+    setLedgerTickers((current) => current.includes(ticker) ? current.filter((value) => value !== ticker) : [...current, ticker]);
+  };
+
+  const openCharter = (ticker: string) => {
+    setSelectedTicker(ticker);
+    setCharterTicker(ticker);
+  };
 
   return (
     <main>
@@ -141,7 +199,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         </a>
         <div className="market-clock">
           <span className="live-dot" aria-hidden="true" />
-          <span><strong>Simulation live</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded ledger" : "Ledger unavailable"} · refresh in {seconds}s</small></span>
+          <span><strong>Simulation live</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded ledger" : "Ledger unavailable"} · {seconds > 0 ? `refresh in ${seconds}s` : "updating…"}</small></span>
         </div>
       </header>
 
@@ -179,6 +237,10 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             </div>
             <Chart points={selected.history} positive={selected.change >= 0} />
             <div className="chart-labels"><span>{selected.history.length > 1 ? "First recorded" : "Recording started"}</span><span>Now</span></div>
+            <div className="focus-actions">
+              <button className="action-button" onClick={() => openCharter(selected.ticker)}>Read company charter</button>
+              <button className="action-button secondary" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from my ledger" : "Add to my ledger"}</button>
+            </div>
             <dl className="instrument-stats">
               <div><dt>Recorded baseline</dt><dd>{number(selected.previousClose)}</dd></div>
               <div><dt>Session open</dt><dd>{number(selected.open)}</dd></div>
@@ -201,9 +263,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             <dl className="rail-stats">
               <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
               <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
-              <div><dt>Item coverage</dt><dd>All vanilla families</dd></div>
+              <div><dt>Item coverage</dt><dd>Broad vanilla families</dd></div>
               <div><dt>Price basis</dt><dd>Simulated · recorded</dd></div>
-              <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${new Date(snapshot.recordedFrom).toLocaleString()}` : "Unavailable"}</dd></div>
+              <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${utcDate(snapshot.recordedFrom)} UTC` : "Unavailable"}</dd></div>
               <div><dt>Recorded ticks</dt><dd>{snapshot.recordedObservations}</dd></div>
             </dl>
           </section>
@@ -213,10 +275,46 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
           </section>
         </aside>
 
+        <section className="exchange-tools" aria-label="Merchant tools">
+          <article className="tool-card price-book">
+            <div className="section-label">Merchant’s Price Book</div>
+            <h2>Find the market behind a ware</h2>
+            <p className="tool-intro">Look up a trade good to find its chartered issuer and current simulated Crown reference.</p>
+            <label className="tool-search"><span className="sr-only">Search the Merchant’s Price Book</span><input value={wareQuery} onChange={(event) => setWareQuery(event.target.value)} placeholder="Try redstone, maps, wool…" /></label>
+            <div className="suggestion-row" aria-label="Suggested wares">{PRICE_BOOK_SUGGESTIONS.map((suggestion) => <button key={suggestion} onClick={() => setWareQuery(suggestion)}>{suggestion}</button>)}</div>
+            <div className="price-book-results" aria-live="polite">
+              {priceBookResults.map((company) => (
+                <button className="price-book-entry" key={company.ticker} onClick={() => openCharter(company.ticker)}>
+                  <span><b>{company.ticker}</b><strong>{company.name}</strong></span>
+                  <span className="price-book-quote"><small>Reference</small><b>{number(company.price)} Crowns</b><Move value={company.changePercent} /></span>
+                  <small>{company.influence}</small>
+                </button>
+              ))}
+              {priceBookResults.length === 0 && <p className="empty-note">No chartered issuer matches that ware. Try a broader trade name.</p>}
+            </div>
+          </article>
+
+          <article className="tool-card personal-ledger">
+            <div className="section-label">Personal Merchant’s Ledger</div>
+            <h2>Your watched companies</h2>
+            <p className="tool-intro">Pinned only on this device. Nothing here is sent to Minecraft or the public exchange.</p>
+            <button className="action-button ledger-add" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? `Remove ${selected.ticker}` : `Add ${selected.ticker}`}</button>
+            <div className="ledger-list" aria-live="polite">
+              {ledgerCompanies.map((company) => (
+                <div className="ledger-entry" key={company.ticker}>
+                  <button onClick={() => openCharter(company.ticker)}><span><b>{company.ticker}</b><strong>{company.name}</strong></span><span><b>{number(company.price)}</b><Move value={company.changePercent} /></span></button>
+                  <button className="ledger-remove" onClick={() => toggleLedger(company.ticker)} aria-label={`Remove ${company.name} from my ledger`}>Remove</button>
+                </div>
+              ))}
+              {ledgerCompanies.length === 0 && <p className="empty-note">Your ledger is empty. Add the selected company or open a charter to pin one.</p>}
+            </div>
+          </article>
+        </section>
+
         <section className="listings" aria-labelledby="listings-title">
           <div className="listings-head">
             <div><div className="section-label">Daily Official List</div><h2 id="listings-title">Guilds and Companies</h2></div>
-            <label className="search"><span className="sr-only">Search issuers and items</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search issuer or vanilla item" /></label>
+            <label className="search"><span className="sr-only">Search guilds, trades and wares</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search guild, trade or ware" /></label>
           </div>
           <div className="market-table" role="table" aria-label="Listed companies">
             <div className="market-row table-header" role="row"><span>Issuer</span><span>Last</span><span>Change</span><span>Volume</span><span>Principal trade</span></div>
@@ -224,7 +322,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <button className={`market-row ${selected.ticker === company.ticker ? "selected" : ""}`} role="row" key={company.ticker} onClick={() => setSelectedTicker(company.ticker)}>
                 <span className="company-cell"><b>{company.ticker}</b><span><strong>{company.name}</strong><small>{company.sector}</small></span></span>
                 <span data-label="Price"><strong>{number(company.price)}</strong><small> Crowns</small></span>
-                <span data-label="24h"><Move value={company.changePercent} /></span>
+                <span data-label="Session"><Move value={company.changePercent} /></span>
                 <span data-label="Volume">{compact(company.volume)}</span>
                 <span className="influence-cell" data-label="Influences">{company.influence}</span>
               </button>
@@ -233,10 +331,35 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         </section>
       </div>
 
+      {charterCompany && (() => {
+        const record = charterRecord(charterCompany);
+        const isPinned = ledgerTickers.includes(charterCompany.ticker);
+        return (
+          <div className="charter-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setCharterTicker(null); }}>
+            <section className="charter-sheet" role="dialog" aria-modal="true" aria-labelledby="charter-title">
+              <button className="charter-close" onClick={() => setCharterTicker(null)} aria-label="Close company charter">Close</button>
+              <div className="charter-kicker">Fictional market charter · {record.register}</div>
+              <div className="charter-heading"><span className="charter-seal" aria-hidden="true">{charterCompany.ticker.slice(0, 2)}</span><div><span>{charterCompany.ticker} · {charterCompany.sector}</span><h2 id="charter-title">{charterCompany.name}</h2><p>{record.seat}</p></div></div>
+              <p className="charter-preamble">Entered in the simulated Royal Exchange register as the recognized market account for {charterCompany.influence.toLowerCase()}.</p>
+              <dl className="charter-facts">
+                <div><dt>Principal wares</dt><dd>{charterCompany.influence}</dd></div>
+                <div><dt>Present standing</dt><dd>{standingFor(charterCompany)}</dd></div>
+                <div><dt>Reference price</dt><dd>{number(charterCompany.price)} Crowns</dd></div>
+                <div><dt>Session movement</dt><dd><Move value={charterCompany.changePercent} /></dd></div>
+                <div><dt>Recorded history</dt><dd>{snapshot.recordedFrom ? `From ${utcDate(snapshot.recordedFrom)} UTC` : "Awaiting ledger"}</dd></div>
+                <div><dt>Recorded observations</dt><dd>{snapshot.recordedObservations}</dd></div>
+              </dl>
+              <blockquote>{record.note}</blockquote>
+              <div className="charter-actions"><button className="action-button" onClick={() => toggleLedger(charterCompany.ticker)}>{isPinned ? "Remove from my ledger" : "Add to my ledger"}</button><button className="action-button secondary" onClick={() => setCharterTicker(null)}>Return to the market</button></div>
+            </section>
+          </div>
+        );
+      })()}
+
       <footer>
         <div><strong>Royal Exchange</strong><span>Simulated market · recorded observations</span><a className="api-link" href="/api/market">Public data feed</a></div>
         <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
-        <div><span>As of</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
+        <div><span>As of</span><time dateTime={snapshot.asOf}>{utcTime(snapshot.asOf)} UTC</time></div>
       </footer>
     </main>
   );
