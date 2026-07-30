@@ -2,6 +2,18 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "royal-exchange-online",
   "main": "dist/server/index.js",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "royalexchange.net",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.royalexchange.net",
+      "custom_domain": true
+    }
+  ],
   "compatibility_date": "2026-05-15",
   "compatibility_flags": ["nodejs_compat"],
   "no_bundle": true,
