@@ -29,6 +29,11 @@ export type MarketEvent = {
 export type MarketSnapshot = {
   exchange: "Royal Exchange";
   mode: "autonomous-wall-clock";
+  simulation: true;
+  modelVersion: "royal-exchange-simulation-v1";
+  historyMode: "recorded-ledger" | "unavailable";
+  recordedFrom: string | null;
+  recordedObservations: number;
   currency: "Crown";
   status: "OPEN";
   asOf: string;
@@ -57,8 +62,6 @@ type CompanyDefinition = {
 };
 
 const MINUTE = 60_000;
-const HISTORY_INTERVAL = 30 * MINUTE;
-const HISTORY_POINTS = 49;
 const DAY = 24 * 60 * MINUTE;
 
 const COMPANIES: CompanyDefinition[] = [
@@ -133,21 +136,13 @@ function companyPrice(definition: CompanyDefinition, time: number): number {
   return Number((definition.base * (1 + dayWave + weekWave + pulse + eventMove)).toFixed(2));
 }
 
-function history(definition: CompanyDefinition, time: number): MarketHistoryPoint[] {
-  const currentPoint = Math.floor(time / HISTORY_INTERVAL) * HISTORY_INTERVAL;
-  return Array.from({ length: HISTORY_POINTS }, (_, index) => {
-    const pointTime = currentPoint - (HISTORY_POINTS - 1 - index) * HISTORY_INTERVAL;
-    return { time: new Date(pointTime).toISOString(), value: companyPrice(definition, pointTime) };
-  });
-}
-
 function companySnapshot(definition: CompanyDefinition, time: number): ListedCompany {
   const price = companyPrice(definition, time);
   const previous = companyPrice(definition, time - DAY);
   const date = new Date(time);
   const dayOpen = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
   const open = companyPrice(definition, dayOpen);
-  const points = history(definition, time);
+  const points = [{ time: new Date(time).toISOString(), value: price }];
   const values = points.map((point) => point.value);
   const change = Number((price - previous).toFixed(2));
   const changePercent = Number(((change / previous) * 100).toFixed(2));
@@ -187,6 +182,11 @@ export function getMarketSnapshot(at = new Date()): MarketSnapshot {
   return {
     exchange: "Royal Exchange",
     mode: "autonomous-wall-clock",
+    simulation: true,
+    modelVersion: "royal-exchange-simulation-v1",
+    historyMode: "unavailable",
+    recordedFrom: null,
+    recordedObservations: 0,
     currency: "Crown",
     status: "OPEN",
     asOf: at.toISOString(),

@@ -87,7 +87,10 @@ function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: b
     return () => observer.disconnect();
   }, [points, positive]);
 
-  return <canvas ref={canvasRef} className="market-chart" aria-label="24 hour price chart" />;
+  if (points.length < 2) {
+    return <div className="market-chart chart-recording" role="img" aria-label="Price history recording has started">Recording first observations</div>;
+  }
+  return <canvas ref={canvasRef} className="market-chart" aria-label="Recorded price history chart" />;
 }
 
 function Move({ value }: { value: number }) {
@@ -111,6 +114,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       }
     };
     const refreshTimer = window.setInterval(refresh, 30_000);
+    void refresh();
     const countdownTimer = window.setInterval(() => {
       setSeconds(Math.max(0, Math.ceil((new Date(snapshot.nextUpdateAt).getTime() - Date.now()) / 1000)));
     }, 1_000);
@@ -137,7 +141,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         </a>
         <div className="market-clock">
           <span className="live-dot" aria-hidden="true" />
-          <span><strong>Market open</strong><small>Indicative prices · refresh in {seconds}s</small></span>
+          <span><strong>Simulation live</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded ledger" : "Ledger unavailable"} · refresh in {seconds}s</small></span>
         </div>
       </header>
 
@@ -153,7 +157,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
       <div className="shell" id="top">
         <section className="overview" aria-labelledby="market-heading">
-          <div className="eyebrow"><span>Royal Exchange Composite · RXC</span><span>Continuous session</span></div>
+          <div className="eyebrow"><span>Royal Exchange Simulation · RXC</span><span>Continuous session</span></div>
           <div className="index-line">
             <div>
               <h1 id="market-heading">{number(snapshot.composite)}</h1>
@@ -174,9 +178,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><Move value={selected.changePercent} /></div>
             </div>
             <Chart points={selected.history} positive={selected.change >= 0} />
-            <div className="chart-labels"><span>24 hours ago</span><span>Now</span></div>
+            <div className="chart-labels"><span>{selected.history.length > 1 ? "First recorded" : "Recording started"}</span><span>Now</span></div>
             <dl className="instrument-stats">
-              <div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div>
+              <div><dt>Recorded baseline</dt><dd>{number(selected.previousClose)}</dd></div>
               <div><dt>Session open</dt><dd>{number(selected.open)}</dd></div>
               <div><dt>High / low</dt><dd>{number(selected.high)} / {number(selected.low)}</dd></div>
               <div><dt>Volume</dt><dd>{compact(selected.volume)}</dd></div>
@@ -186,7 +190,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
         <aside className="market-rail" aria-label="Market briefing">
           <section className="briefing-card">
-            <div className="section-label">Market notice</div>
+            <div className="section-label">Simulated market notice</div>
             <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.tone === "positive" ? "Supportive" : snapshot.event.tone === "negative" ? "Adverse" : "Neutral"}</span>
             <h2>{snapshot.event.title}</h2>
             <p>{snapshot.event.description}</p>
@@ -198,7 +202,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
               <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
               <div><dt>Item coverage</dt><dd>All vanilla families</dd></div>
-              <div><dt>Price basis</dt><dd>Indicative</dd></div>
+              <div><dt>Price basis</dt><dd>Simulated · recorded</dd></div>
+              <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${new Date(snapshot.recordedFrom).toLocaleString()}` : "Unavailable"}</dd></div>
+              <div><dt>Recorded ticks</dt><dd>{snapshot.recordedObservations}</dd></div>
             </dl>
           </section>
           <section className="rail-card movers-card">
@@ -228,7 +234,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       </div>
 
       <footer>
-        <div><strong>Royal Exchange</strong><span>Fictional market · indicative values</span><a className="api-link" href="/api/market">Public data feed</a></div>
+        <div><strong>Royal Exchange</strong><span>Simulated market · recorded observations</span><a className="api-link" href="/api/market">Public data feed</a></div>
         <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
         <div><span>As of</span><time dateTime={snapshot.asOf}>{new Date(snapshot.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}</time></div>
       </footer>

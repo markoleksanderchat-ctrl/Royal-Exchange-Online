@@ -1,6 +1,8 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { getMarketSnapshot } from "../lib/market";
+import { getRecordedMarketSnapshot, recordMarketTick } from "../lib/market-ledger";
 
 interface Env {
   ASSETS: Fetcher;
@@ -29,6 +31,17 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    if (request.method === "GET" && url.pathname === "/api/market") {
+      if (!env.DB) return Response.json(getMarketSnapshot(), { headers: marketHeaders("unavailable") });
+      try {
+        const snapshot = await getRecordedMarketSnapshot(env.DB, new Date());
+        return Response.json(snapshot, { headers: marketHeaders("recorded-ledger") });
+      } catch (error) {
+        console.error("Royal Exchange ledger unavailable", error);
+        return Response.json(getMarketSnapshot(), { headers: marketHeaders("unavailable") });
+      }
+    }
+
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
@@ -42,6 +55,19 @@ const worker = {
 
     return handler.fetch(request, env, ctx);
   },
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(recordMarketTick(env.DB, new Date(controller.scheduledTime)));
+  },
 };
+
+function marketHeaders(historyMode: "recorded-ledger" | "unavailable") {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": historyMode === "recorded-ledger" ? "public, max-age=20, stale-while-revalidate=20" : "no-store",
+    "X-Royal-Exchange-Mode": "autonomous-wall-clock",
+    "X-Royal-Exchange-Simulation": "true",
+    "X-Royal-Exchange-History": historyMode,
+  };
+}
 
 export default worker;

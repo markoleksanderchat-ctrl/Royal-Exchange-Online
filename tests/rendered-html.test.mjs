@@ -23,11 +23,12 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>Royal Exchange — Live Crown Market<\/title>/i);
+  assert.match(html, /<title>Royal Exchange — Recorded Crown Market<\/title>/i);
   assert.match(html, /Royal Exchange/);
-  assert.match(html, /Royal Exchange Composite/);
+  assert.match(html, /Royal Exchange Simulation/);
   assert.match(html, /Market at Guildhall/);
-  assert.match(html, /Market notice/);
+  assert.match(html, /Simulated market notice/);
+  assert.match(html, /Simulation live/);
   assert.match(html, /Daily Official List/);
   assert.match(html, /Browne of Calais Staple/);
   assert.match(html, /Whittington Mercery/);
@@ -43,10 +44,16 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), "*");
   assert.equal(response.headers.get("x-royal-exchange-mode"), "autonomous-wall-clock");
+  assert.equal(response.headers.get("x-royal-exchange-simulation"), "true");
+  assert.equal(response.headers.get("x-royal-exchange-history"), "unavailable");
   const market = await response.json();
   assert.equal(market.exchange, "Royal Exchange");
   assert.equal(market.status, "OPEN");
   assert.equal(market.mode, "autonomous-wall-clock");
+  assert.equal(market.simulation, true);
+  assert.equal(market.modelVersion, "royal-exchange-simulation-v1");
+  assert.equal(market.historyMode, "unavailable");
+  assert.equal(market.recordedObservations, 0);
   assert.equal(market.companies.length, 38);
   assert.ok(market.composite > 0);
   assert.ok(market.totalVolume > 0);
@@ -56,7 +63,7 @@ test("publishes a complete autonomous market snapshot", async () => {
     assert.ok(company.price > 0);
     assert.ok(company.open > 0);
     assert.ok(company.previousClose > 0);
-    assert.equal(company.history.length, 49);
+    assert.equal(company.history.length, 1);
   }
   assert.ok(market.companies.some((company) => company.influence.includes("Redstone")));
   assert.ok(market.companies.some((company) => company.influence.includes("Nether")));
@@ -77,7 +84,7 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.index-line \{ display: grid;/);
   assert.match(styles, /\.market-rail \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@media \(max-width: 430px\)[\s\S]*?\.focus-heading \{ display: grid;/);
-  assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: null, r2: null });
+  assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
   await access(new URL("../dist/server/index.js", import.meta.url));
