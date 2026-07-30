@@ -1,6 +1,7 @@
 param(
   [string]$MinecraftJar = 'C:\Users\marko\AppData\Roaming\.minecraft\versions\1.21.1\1.21.1.jar',
-  [string]$OutputPath = (Join-Path $PSScriptRoot '..\app\minecraft-items.ts')
+  [string]$OutputPath = (Join-Path $PSScriptRoot '..\app\minecraft-items.ts'),
+  [string]$BridgeOutputPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,3 +103,19 @@ $lines.Add('')
 $absoluteOutput = [System.IO.Path]::GetFullPath($OutputPath)
 [System.IO.File]::WriteAllLines($absoluteOutput, $lines, [System.Text.UTF8Encoding]::new($false))
 Write-Output "Generated $($items.Count) item entries at $absoluteOutput"
+
+if ($BridgeOutputPath) {
+  $issuerMap = [ordered]@{}
+  foreach ($item in $items) { $issuerMap["minecraft:$($item.id)"] = $item.ticker }
+  $bridgeCatalog = [ordered]@{
+    minecraftVersion = '1.21.1'
+    itemCount = $items.Count
+    items = $issuerMap
+  }
+  $absoluteBridgeOutput = [System.IO.Path]::GetFullPath($BridgeOutputPath)
+  $parent = [System.IO.Path]::GetDirectoryName($absoluteBridgeOutput)
+  [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+  [System.IO.File]::WriteAllText($absoluteBridgeOutput,
+    ($bridgeCatalog | ConvertTo-Json -Depth 4), [System.Text.UTF8Encoding]::new($false))
+  Write-Output "Generated Bridge issuer catalog at $absoluteBridgeOutput"
+}
