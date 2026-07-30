@@ -142,8 +142,11 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
   const advancing = companies.filter((company) => company.change > 0.005).length;
   const declining = companies.filter((company) => company.change < -0.005).length;
   const storedEvent = JSON.parse(currentMarket.event_json) as MarketEvent | { event?: MarketEvent; events?: MarketEvent[] };
-  const event = "event" in storedEvent ? storedEvent.event ?? QUIET_EVENT : storedEvent;
-  const events = "event" in storedEvent ? storedEvent.events ?? (event.id === "none" ? [] : [event]) : [];
+  const storedEnvelope = "event" in storedEvent || "events" in storedEvent
+    ? storedEvent as { event?: MarketEvent; events?: MarketEvent[] }
+    : null;
+  const event: MarketEvent = storedEnvelope ? storedEnvelope.event ?? QUIET_EVENT : storedEvent as MarketEvent;
+  const events: MarketEvent[] = storedEnvelope?.events ?? (event.id === "none" ? [] : [event]);
 
   return {
     exchange: "Royal Exchange",

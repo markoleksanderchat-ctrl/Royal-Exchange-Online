@@ -56,7 +56,7 @@ export type MarketSnapshot = {
   exchange: "Royal Exchange";
   mode: "autonomous-wall-clock";
   simulation: true;
-  modelVersion: "royal-exchange-simulation-v1";
+  modelVersion: "royal-exchange-simulation-v2-anomalies";
   historyMode: "recorded-ledger" | "unavailable";
   recordedFrom: string | null;
   recordedObservations: number;

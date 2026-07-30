@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { getMarketSnapshot } from "../lib/market";
 import { getRecordedMarketSnapshot, recordMarketTick } from "../lib/market-ledger";
+import { handleRoyalExchangeMcp } from "./mcp";
 
 interface Env {
   ASSETS: Fetcher;
@@ -14,11 +15,6 @@ interface Env {
       };
     };
   };
-}
-
-interface ExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
-  passThroughOnException(): void;
 }
 
 // Image security config. SVG sources with .svg extension auto-skip the
@@ -40,6 +36,10 @@ const worker = {
         console.error("Royal Exchange ledger unavailable", error);
         return Response.json(getMarketSnapshot(), { headers: marketHeaders("unavailable") });
       }
+    }
+
+    if (url.pathname === "/mcp") {
+      return handleRoyalExchangeMcp(request, env, ctx);
     }
 
     if (url.pathname === "/_vinext/image") {

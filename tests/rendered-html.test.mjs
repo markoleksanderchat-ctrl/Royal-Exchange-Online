@@ -88,7 +88,7 @@ test("publishes a complete autonomous market snapshot", async () => {
 });
 
 test("removes starter assets and packages production metadata", async () => {
-  const [packageJson, hosting, layout, styles, dashboard, records, minecraftItems, generator, socialCard] = await Promise.all([
+  const [packageJson, hosting, layout, styles, dashboard, records, minecraftItems, generator, mcp, workerEntry, socialCard] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -97,9 +97,13 @@ test("removes starter assets and packages production metadata", async () => {
     readFile(new URL("../app/market-records.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/minecraft-items.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/generate-minecraft-item-catalog.ps1", import.meta.url), "utf8"),
+    readFile(new URL("../worker/mcp.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
   assert.doesNotMatch(packageJson, /react-loading-skeleton|site-creator-vinext-starter/);
+  assert.match(packageJson, /@modelcontextprotocol\/server/);
+  assert.match(packageJson, /"agents"/);
   assert.doesNotMatch(layout, /codex-preview|Starter Project|favicon\.svg/);
   assert.match(styles, /\.primary-nav/);
   assert.match(styles, /\.market-strip \{ min-width: 0; grid-column: 1 \/ -1; display: grid;/);
@@ -123,6 +127,10 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(minecraftItems, /id: "diamond", name: "Diamond", ticker: "GDSM"/);
   assert.match(minecraftItems, /id: "music_disc_13", name: "Music Disc", ticker: "MUSC"/);
   assert.match(generator, /assets\/minecraft\/models\/item/);
+  assert.match(mcp, /createMcpHandler/);
+  assert.match(mcp, /readOnlyHint: true/);
+  assert.match(mcp, /find_minecraft_wares/);
+  assert.match(workerEntry, /url\.pathname === "\/mcp"/);
   assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
