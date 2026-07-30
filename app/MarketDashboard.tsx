@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ListedCompany, MarketHistoryPoint, MarketSnapshot } from "../lib/market";
+import { MINECRAFT_ITEM_COUNT, MINECRAFT_ITEMS, MINECRAFT_VERSION } from "./minecraft-items";
 import { charterRecord, PRICE_BOOK_SUGGESTIONS, standingFor } from "./market-records";
 
 const LEDGER_KEY = "royal-exchange-merchant-ledger-v1";
+const FEATURED_ITEM_IDS = ["diamond", "redstone", "white_wool", "music_disc_13", "filled_map", "potion", "iron_ingot", "oak_log"];
 
 function number(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
@@ -175,8 +177,14 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const leaders = [...snapshot.companies].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
   const priceBookResults = useMemo(() => {
     const needle = wareQuery.trim().toLowerCase();
-    if (!needle) return snapshot.companies.slice(0, 6);
-    return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector} ${company.influence}`.toLowerCase().includes(needle)).slice(0, 8);
+    const matches = (needle ? MINECRAFT_ITEMS.filter((item) => {
+      const company = snapshot.companies.find((entry) => entry.ticker === item.ticker);
+      return `${item.id} ${item.name} ${company?.ticker ?? ""} ${company?.name ?? ""} ${company?.sector ?? ""}`.toLowerCase().includes(needle);
+    }) : FEATURED_ITEM_IDS.map((id) => MINECRAFT_ITEMS.find((item) => item.id === id)).filter((item): item is (typeof MINECRAFT_ITEMS)[number] => Boolean(item)));
+    return {
+      total: matches.length,
+      entries: matches.slice(0, 12).map((item) => ({ item, company: snapshot.companies.find((company) => company.ticker === item.ticker) })).filter((entry): entry is { item: (typeof MINECRAFT_ITEMS)[number]; company: ListedCompany } => Boolean(entry.company)),
+    };
   }, [snapshot.companies, wareQuery]);
   const ledgerCompanies = ledgerTickers.map((ticker) => snapshot.companies.find((company) => company.ticker === ticker)).filter((company): company is ListedCompany => Boolean(company));
   const charterCompany = charterTicker ? snapshot.companies.find((company) => company.ticker === charterTicker) ?? null : null;
@@ -278,19 +286,20 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         <section className="exchange-tools" aria-label="Merchant tools">
           <article className="tool-card price-book">
             <div className="section-label">Merchant’s Price Book</div>
-            <h2>Find the market behind a ware</h2>
-            <p className="tool-intro">Look up a trade good to find its chartered issuer and current simulated Crown reference.</p>
+            <h2>Individual Minecraft wares</h2>
+            <p className="tool-intro">Search {number(MINECRAFT_ITEM_COUNT, 0)} individual vanilla {MINECRAFT_VERSION} items. Each entry shows its responsible issuer and linked simulated market quote.</p>
             <label className="tool-search"><span className="sr-only">Search the Merchant’s Price Book</span><input value={wareQuery} onChange={(event) => setWareQuery(event.target.value)} placeholder="Try redstone, maps, wool…" /></label>
             <div className="suggestion-row" aria-label="Suggested wares">{PRICE_BOOK_SUGGESTIONS.map((suggestion) => <button key={suggestion} onClick={() => setWareQuery(suggestion)}>{suggestion}</button>)}</div>
+            <div className="price-book-count" aria-live="polite">{wareQuery.trim() ? `${priceBookResults.total} matching individual items${priceBookResults.total > priceBookResults.entries.length ? ` · showing first ${priceBookResults.entries.length}` : ""}` : "Featured individual items"}</div>
             <div className="price-book-results" aria-live="polite">
-              {priceBookResults.map((company) => (
-                <button className="price-book-entry" key={company.ticker} onClick={() => openCharter(company.ticker)}>
-                  <span><b>{company.ticker}</b><strong>{company.name}</strong></span>
-                  <span className="price-book-quote"><small>Reference</small><b>{number(company.price)} Crowns</b><Move value={company.changePercent} /></span>
-                  <small>{company.influence}</small>
+              {priceBookResults.entries.map(({ item, company }) => (
+                <button className="price-book-entry" key={item.id} onClick={() => openCharter(company.ticker)}>
+                  <span><strong>{item.name}</strong><code>minecraft:{item.id}</code></span>
+                  <span className="price-book-quote"><small>Linked quote · {company.ticker}</small><b>{number(company.price)} Crowns</b><Move value={company.changePercent} /></span>
+                  <small>{company.name} · {company.sector}</small>
                 </button>
               ))}
-              {priceBookResults.length === 0 && <p className="empty-note">No chartered issuer matches that ware. Try a broader trade name.</p>}
+              {priceBookResults.entries.length === 0 && <p className="empty-note">No individual Minecraft item matches that search.</p>}
             </div>
           </article>
 

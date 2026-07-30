@@ -162,12 +162,14 @@ a { color: inherit; text-decoration: none; }
 .suggestion-row { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 17px; }
 .suggestion-row button { padding: 5px 8px; border: 1px solid #b29a75; background: transparent; color: #664719; cursor: pointer; font: 700 9px var(--font-mono), monospace; text-transform: uppercase; }
 .suggestion-row button:hover, .suggestion-row button:focus-visible { background: rgba(154,117,56,.12); outline: none; }
+.price-book-count { margin: 0 0 8px; color: #755b38; font: 700 9px var(--font-mono), monospace; letter-spacing: .05em; text-transform: uppercase; }
 .price-book-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
 .price-book-entry { min-width: 0; min-height: 112px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 14px; align-content: start; padding: 14px; border: 0; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: transparent; cursor: pointer; text-align: left; }
 .price-book-entry:hover, .price-book-entry:focus-visible { background: rgba(114,75,29,.07); outline: none; }
 .price-book-entry > span:first-child { display: grid; gap: 4px; min-width: 0; }
 .price-book-entry > span:first-child b { color: #7a4f16; font: 700 10px var(--font-mono), monospace; }
 .price-book-entry > span:first-child strong { overflow-wrap: anywhere; font-size: 13px; }
+.price-book-entry > span:first-child code { color: #7a4f16; overflow-wrap: anywhere; font: 600 9px var(--font-mono), monospace; }
 .price-book-entry > small { grid-column: 1 / -1; color: #5f503b; font-size: 10px; line-height: 1.4; }
 .price-book-quote { display: grid; justify-items: end; gap: 3px; text-align: right; }
 .price-book-quote small { color: #78674d; font: 700 8px var(--font-sans), sans-serif; letter-spacing: .08em; text-transform: uppercase; }

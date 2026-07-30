@@ -31,6 +31,10 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /Simulation live/);
   assert.match(html, /Daily Official List/);
   assert.match(html, /Merchant(?:’|&rsquo;)s Price Book/);
+  assert.match(html, /Individual Minecraft wares/);
+  assert.match(html, /1,332[\s\S]{0,120}individual vanilla[\s\S]{0,120}1\.21\.1[\s\S]{0,120}items/);
+  assert.match(html, /Redstone Dust/);
+  assert.match(html, /minecraft:[\s\S]{0,40}redstone/);
   assert.match(html, /Personal Merchant(?:’|&rsquo;)s Ledger/);
   assert.match(html, /Read company charter/);
   assert.match(html, /Pinned only on this device/);
@@ -76,13 +80,15 @@ test("publishes a complete autonomous market snapshot", async () => {
 });
 
 test("removes starter assets and packages production metadata", async () => {
-  const [packageJson, hosting, layout, styles, dashboard, records, socialCard] = await Promise.all([
+  const [packageJson, hosting, layout, styles, dashboard, records, minecraftItems, generator, socialCard] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/MarketDashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/market-records.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/minecraft-items.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/generate-minecraft-item-catalog.ps1", import.meta.url), "utf8"),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
   assert.doesNotMatch(packageJson, /react-loading-skeleton|site-creator-vinext-starter/);
@@ -94,6 +100,10 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(dashboard, /Fictional market charter/);
   assert.match(dashboard, /Nothing here is sent to Minecraft or the public exchange/);
   assert.match(records, /CHARTER_SEATS/);
+  assert.match(minecraftItems, /MINECRAFT_ITEM_COUNT = 1332/);
+  assert.match(minecraftItems, /id: "diamond", name: "Diamond", ticker: "GDSM"/);
+  assert.match(minecraftItems, /id: "music_disc_13", name: "Music Disc", ticker: "MUSC"/);
+  assert.match(generator, /assets\/minecraft\/models\/item/);
   assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
