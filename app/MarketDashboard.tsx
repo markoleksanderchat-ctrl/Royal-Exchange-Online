@@ -6,7 +6,9 @@ import { MINECRAFT_ITEM_COUNT, MINECRAFT_ITEMS, MINECRAFT_VERSION } from "./mine
 import { charterRecord, PRICE_BOOK_SUGGESTIONS, standingFor } from "./market-records";
 
 const LEDGER_KEY = "royal-exchange-merchant-ledger-v1";
+const THEME_KEY = "royal-exchange-theme-v1";
 const FEATURED_ITEM_IDS = ["diamond", "redstone", "white_wool", "music_disc_13", "filled_map", "potion", "iron_ingot", "oak_log"];
+type ThemeMode = "light" | "dark";
 
 function number(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
@@ -28,8 +30,9 @@ function utcTime(value: string) {
   return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }).format(new Date(value));
 }
 
-function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: boolean }) {
+function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -54,7 +57,8 @@ function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: b
       const top = 14;
       const bottom = bounds.height - 18;
 
-      context.strokeStyle = "rgba(92, 62, 31, .18)";
+      const styles = window.getComputedStyle(canvas);
+      context.strokeStyle = styles.getPropertyValue("--chart-grid").trim() || "rgba(92, 62, 31, .18)";
       context.lineWidth = 1;
       for (let line = 0; line < 4; line += 1) {
         const y = top + ((bottom - top) * line) / 3;
@@ -68,10 +72,11 @@ function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: b
         x: left + ((right - left) * index) / (points.length - 1),
         y: bottom - ((point.value - low) / range) * (bottom - top),
       }));
-      const color = positive ? "#3c7755" : "#9e493d";
-      const fade = positive ? "rgba(60, 119, 85, .03)" : "rgba(158, 73, 61, .03)";
+      const color = styles.getPropertyValue(positive ? "--chart-up" : "--chart-down").trim() || (positive ? "#3c7755" : "#9e493d");
+      const gradientTop = styles.getPropertyValue(positive ? "--chart-up-fill" : "--chart-down-fill").trim() || (positive ? "rgba(60, 119, 85, .28)" : "rgba(158, 73, 61, .26)");
+      const fade = styles.getPropertyValue(positive ? "--chart-up-fade" : "--chart-down-fade").trim() || (positive ? "rgba(60, 119, 85, .03)" : "rgba(158, 73, 61, .03)");
       const gradient = context.createLinearGradient(0, top, 0, bottom);
-      gradient.addColorStop(0, positive ? "rgba(60, 119, 85, .28)" : "rgba(158, 73, 61, .26)");
+      gradient.addColorStop(0, gradientTop);
       gradient.addColorStop(1, fade);
       context.beginPath();
       coordinates.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
@@ -98,12 +103,51 @@ function Chart({ points, positive }: { points: MarketHistoryPoint[]; positive: b
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [points, positive]);
+  }, [points, positive, theme]);
 
   if (points.length < 2) {
     return <div className="market-chart chart-recording" role="img" aria-label="Price history recording has started">Recording first observations</div>;
   }
-  return <canvas ref={canvasRef} className="market-chart" aria-label="Recorded price history chart" />;
+  const selectNearestPoint = (clientX: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const bounds = canvas.getBoundingClientRect();
+    const progress = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width)));
+    setHoverIndex(Math.round(progress * (points.length - 1)));
+  };
+  const moveSelection = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") setHoverIndex(0);
+    else if (event.key === "End") setHoverIndex(points.length - 1);
+    else setHoverIndex((current) => Math.max(0, Math.min(points.length - 1,
+      (current ?? points.length - 1) + (event.key === "ArrowLeft" ? -1 : 1))));
+  };
+  const hovered = hoverIndex === null ? null : points[hoverIndex];
+  const pointPosition = hoverIndex === null ? 0 : (hoverIndex / (points.length - 1)) * 100;
+  const tooltipPosition = Math.max(8, Math.min(92, pointPosition));
+
+  return (
+    <div className="market-chart-wrap" onPointerLeave={() => setHoverIndex(null)}>
+      <canvas
+        ref={canvasRef}
+        className="market-chart"
+        aria-label={hovered ? `Recorded price ${number(hovered.value)} Crowns at ${utcDate(hovered.time)} ${utcTime(hovered.time)} UTC` : "Recorded price history chart. Use the pointer or arrow keys to inspect prices."}
+        tabIndex={0}
+        onPointerMove={(event) => selectNearestPoint(event.clientX)}
+        onPointerDown={(event) => selectNearestPoint(event.clientX)}
+        onKeyDown={moveSelection}
+        onBlur={() => setHoverIndex(null)}
+      />
+      {hovered && <>
+        <span className="chart-crosshair" style={{ left: `${pointPosition}%` }} aria-hidden="true" />
+        <output className="chart-tooltip" style={{ left: `${tooltipPosition}%` }}>
+          <span>{utcDate(hovered.time)} · {utcTime(hovered.time)} UTC</span>
+          <strong>{number(hovered.value)} Crowns</strong>
+        </output>
+      </>}
+    </div>
+  );
 }
 
 function Move({ value }: { value: number }) {
@@ -120,6 +164,27 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const [ledgerTickers, setLedgerTickers] = useState<string[]>([]);
   const [ledgerReady, setLedgerReady] = useState(false);
   const [charterTicker, setCharterTicker] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [themeReady, setThemeReady] = useState(false);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      const saved = window.localStorage.getItem(THEME_KEY);
+      const initialTheme: ThemeMode = saved === "dark" || saved === "light"
+        ? saved
+        : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      setTheme(initialTheme);
+      document.documentElement.dataset.theme = initialTheme;
+      setThemeReady(true);
+    }, 0);
+    return () => window.clearTimeout(loadTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!themeReady) return;
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(THEME_KEY, theme);
+  }, [theme, themeReady]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -203,7 +268,10 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       <header className="site-header">
         <div className="utility-bar">
           <span>Official website of the simulated Royal Exchange</span>
-          <span>Market data · Public access · Minecraft 1.21.1</span>
+          <div className="utility-actions">
+            <span className="utility-message">Market data · Public access · Minecraft 1.21.1</span>
+            <button className="theme-toggle" type="button" aria-pressed={theme === "dark"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}>{theme === "dark" ? "Light mode" : "Dark mode"}</button>
+          </div>
         </div>
         <div className="masthead">
           <a className="brand" href="#top" aria-label="Royal Exchange home">
@@ -267,7 +335,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div><span className="ticker-badge">{selected.ticker}</span><h2>{selected.name}</h2><p>{selected.sector} · {selected.influence}</p></div>
               <div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><Move value={selected.changePercent} /></div>
             </div>
-            <Chart points={selected.history} positive={selected.change >= 0} />
+            <Chart points={selected.history} positive={selected.change >= 0} theme={theme} />
             <div className="chart-labels"><span>{selected.history.length > 1 ? "First recorded" : "Recording started"}</span><span>Now</span></div>
             <div className="focus-actions">
               <button className="action-button" onClick={() => openCharter(selected.ticker)}>Read company charter</button>

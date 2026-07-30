@@ -33,6 +33,7 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /Market data API/);
   assert.match(html, /Simulated market notice/);
   assert.match(html, /Continuous session/);
+  assert.match(html, /Dark mode/);
   assert.match(html, /Daily Official List/);
   assert.match(html, /Merchant(?:’|&rsquo;)s Price Book/);
   assert.match(html, /Individual Minecraft wares/);
@@ -106,8 +107,15 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.index-line \{ display: grid;/);
   assert.match(styles, /@media \(max-width: 1050px\)[\s\S]*?\.market-rail \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.focus-heading \{ display: grid;/);
+  assert.match(styles, /:root\[data-theme="dark"\]/);
+  assert.match(styles, /\.chart-tooltip/);
+  assert.match(styles, /\.chart-crosshair/);
   assert.doesNotMatch(styles, /backdrop-filter|linear-gradient|glassmorphism/i);
   assert.match(dashboard, /royal-exchange-merchant-ledger-v1/);
+  assert.match(dashboard, /royal-exchange-theme-v1/);
+  assert.match(dashboard, /onPointerMove/);
+  assert.match(dashboard, /ArrowLeft/);
+  assert.match(dashboard, /Crowns at/);
   assert.match(dashboard, /Fictional market charter/);
   assert.match(dashboard, /Nothing here is sent to Minecraft or the public exchange/);
   assert.match(records, /CHARTER_SEATS/);
