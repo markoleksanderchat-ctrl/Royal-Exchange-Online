@@ -87,8 +87,35 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(new Set(market.companies.map((company) => company.ticker)).size, 38);
 });
 
+test("publishes a compact read-only assistant API", async () => {
+  const app = await worker();
+  const overviewResponse = await app.fetch(new Request("https://exchange.example/api/assistant"), environment, context);
+  assert.equal(overviewResponse.status, 200);
+  assert.equal(overviewResponse.headers.get("access-control-allow-origin"), "*");
+  const overview = await overviewResponse.json();
+  assert.equal(overview.mode, "overview");
+  assert.equal(overview.simulated, true);
+  assert.equal(overview.listedIssuers, 38);
+  assert.equal(overview.matches.length, 38);
+  assert.equal(overview.matches[0].history, undefined);
+
+  const issuerResponse = await app.fetch(new Request("https://exchange.example/api/assistant?identifier=WIRE&historyPoints=4"), environment, context);
+  assert.equal(issuerResponse.status, 200);
+  const issuer = await issuerResponse.json();
+  assert.equal(issuer.mode, "issuer");
+  assert.equal(issuer.issuer.ticker, "WIRE");
+  assert.equal(issuer.issuer.charter.register, "RXC-WIRE");
+  assert.ok(issuer.issuer.history.length <= 4);
+
+  const searchResponse = await app.fetch(new Request("https://exchange.example/api/assistant?query=redstone"), environment, context);
+  assert.equal(searchResponse.status, 200);
+  const search = await searchResponse.json();
+  assert.equal(search.mode, "search");
+  assert.ok(search.matches.some((company) => company.ticker === "WIRE"));
+});
+
 test("removes starter assets and packages production metadata", async () => {
-  const [packageJson, hosting, layout, styles, dashboard, records, minecraftItems, generator, mcp, workerEntry, socialCard] = await Promise.all([
+  const [packageJson, hosting, layout, styles, dashboard, records, minecraftItems, generator, mcp, assistantApi, workerEntry, socialCard] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -98,6 +125,7 @@ test("removes starter assets and packages production metadata", async () => {
     readFile(new URL("../app/minecraft-items.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/generate-minecraft-item-catalog.ps1", import.meta.url), "utf8"),
     readFile(new URL("../worker/mcp.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/assistant-api.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
@@ -130,7 +158,10 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(mcp, /createMcpHandler/);
   assert.match(mcp, /readOnlyHint: true/);
   assert.match(mcp, /find_minecraft_wares/);
+  assert.match(assistantApi, /handleAssistantApi/);
+  assert.match(assistantApi, /charterRecord/);
   assert.match(workerEntry, /url\.pathname === "\/mcp"/);
+  assert.match(workerEntry, /url\.pathname === "\/api\/assistant"/);
   assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

@@ -6,6 +6,8 @@ The autonomous wall-clock engine publishes a new shared market tick every minute
 
 `GET /api/market` returns the same public snapshot used by the site. Minecraft integration is intentionally one-way: the mod may read this market later, but gameplay never changes it.
 
+`GET /api/assistant` returns a compact read-only snapshot for ChatGPT actions. Optional `identifier`, `query`, and `historyPoints` parameters provide focused issuer, search, lore, and history responses without sending the full ledger.
+
 `POST /mcp` is the public, read-only Streamable HTTP MCP endpoint for ChatGPT and other MCP clients. It exposes focused tools for market summaries, issuer search, quotes and lore, comparisons, notices, and Minecraft ware-to-issuer lookup. The endpoint reads the same market ledger as the site and cannot place trades or write gameplay data.
 
 ## Validation

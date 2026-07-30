@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { getMarketSnapshot } from "../lib/market";
 import { getRecordedMarketSnapshot, recordMarketTick } from "../lib/market-ledger";
+import { handleAssistantApi } from "./assistant-api";
 import { handleRoyalExchangeMcp } from "./mcp";
 
 interface Env {
@@ -36,6 +37,10 @@ const worker = {
         console.error("Royal Exchange ledger unavailable", error);
         return Response.json(getMarketSnapshot(), { headers: marketHeaders("unavailable") });
       }
+    }
+
+    if (url.pathname === "/api/assistant") {
+      return handleAssistantApi(request, env);
     }
 
     if (url.pathname === "/mcp") {
