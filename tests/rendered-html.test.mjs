@@ -102,9 +102,9 @@ test("removes starter assets and packages production metadata", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton|site-creator-vinext-starter/);
   assert.doesNotMatch(layout, /codex-preview|Starter Project|favicon\.svg/);
   assert.match(styles, /\.primary-nav/);
-  assert.match(styles, /\.market-strip \{ grid-column: 1 \/ -1; display: grid;/);
+  assert.match(styles, /\.market-strip \{ min-width: 0; grid-column: 1 \/ -1; display: grid;/);
   assert.match(styles, /\.market-row \{[\s\S]*?grid-template-columns:/);
-  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.index-line \{ display: grid;/);
+  assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.primary-nav \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)[\s\S]*?\.index-line \{ display: grid;/);
   assert.match(styles, /@media \(max-width: 1050px\)[\s\S]*?\.market-rail \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.focus-heading \{ display: grid;/);
   assert.match(styles, /:root\[data-theme="dark"\]/);
