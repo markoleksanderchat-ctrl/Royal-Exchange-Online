@@ -12,18 +12,18 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   return {
     metadataBase: new URL(`${protocol}://${host}`),
-    title: { default: "Royal Exchange — Recorded Crown Market", template: "%s · Royal Exchange" },
-    description: "A clearly labeled simulated Crown market with a persistent record of every observed price movement.",
+    title: { default: "Royal Exchange — Crown Market Data", template: "%s · Royal Exchange" },
+    description: "Official market data, issuer listings and Minecraft item coverage for the simulated Royal Exchange Crown market.",
     openGraph: {
-      title: "Royal Exchange — Recorded Crown Market",
-      description: "A simulated Crown market with persistent recorded history.",
+      title: "Royal Exchange — Crown Market Data",
+      description: "Official listings and recorded data from the simulated Crown market.",
       type: "website",
       images: [{ url: "/og.png", width: 1200, height: 630, alt: "Royal Exchange live Crown Market" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Royal Exchange — Recorded Crown Market",
-      description: "A simulated Crown market with persistent recorded history.",
+      title: "Royal Exchange — Crown Market Data",
+      description: "Official listings and recorded data from the simulated Crown market.",
       images: ["/og.png"],
     },
   };

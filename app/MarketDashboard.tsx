@@ -200,15 +200,28 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
   return (
     <main>
-      <header className="masthead">
-        <a className="brand" href="#top" aria-label="Royal Exchange home">
-          <span className="brand-mark" aria-hidden="true">RE</span>
-          <span><strong>Royal Exchange</strong><small>Market at Guildhall</small></span>
-        </a>
-        <div className="market-clock">
-          <span className="live-dot" aria-hidden="true" />
-          <span><strong>Simulation live</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded ledger" : "Ledger unavailable"} · {seconds > 0 ? `refresh in ${seconds}s` : "updating…"}</small></span>
+      <header className="site-header">
+        <div className="utility-bar">
+          <span>Official website of the simulated Royal Exchange</span>
+          <span>Market data · Public access · Minecraft 1.21.1</span>
         </div>
+        <div className="masthead">
+          <a className="brand" href="#top" aria-label="Royal Exchange home">
+            <strong>Royal Exchange</strong>
+            <small>The Crown Market at Guildhall</small>
+          </a>
+          <div className="market-clock">
+            <span className="live-dot" aria-hidden="true" />
+            <span><strong>Continuous session</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded market ledger" : "Ledger unavailable"} · {seconds > 0 ? `next calculation ${seconds}s` : "calculating…"}</small></span>
+          </div>
+        </div>
+        <nav className="primary-nav" aria-label="Primary navigation">
+          <a href="#overview">Market overview</a>
+          <a href="#official-list">Official list</a>
+          <a href="#price-book">Price book</a>
+          <a href="#my-ledger">My ledger</a>
+          <a href="/api/market">Market data API</a>
+        </nav>
       </header>
 
       <section className="ticker-tape" aria-label="Live market ticker">
@@ -222,13 +235,24 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       </section>
 
       <div className="shell" id="top">
-        <section className="overview" aria-labelledby="market-heading">
-          <div className="eyebrow"><span>Royal Exchange Simulation · RXC</span><span>Continuous session</span></div>
+        <section className="market-strip" aria-label="Market status">
+          <div><span>Market</span><strong className="status-open">Open</strong></div>
+          <div><span>Data status</span><strong>Simulated · recorded</strong></div>
+          <div><span>As of</span><strong>{utcTime(snapshot.asOf)} UTC</strong></div>
+          <div><span>Listed issuers</span><strong>{snapshot.companies.length}</strong></div>
+          <div><span>Vanilla instruments</span><strong>{number(MINECRAFT_ITEM_COUNT, 0)}</strong></div>
+        </section>
+
+        <section className="overview" id="overview" aria-labelledby="market-heading">
+          <div className="overview-heading">
+            <div><span className="market-code">RXC</span><h1 id="market-heading">Royal Exchange Composite</h1></div>
+            <p>Reference index for the Crown market’s thirty-eight listed guilds and companies.</p>
+          </div>
           <div className="index-line">
             <div>
-              <h1 id="market-heading">{number(snapshot.composite)}</h1>
+              <strong className="index-value">{number(snapshot.composite)}</strong>
               <p className={snapshot.compositeChange >= 0 ? "positive" : "negative"}>
-                {signed(snapshot.compositeChange)} · {signed(snapshot.compositeChangePercent, "%")} today
+                {signed(snapshot.compositeChange)} ({signed(snapshot.compositeChangePercent, "%")}) session
               </p>
             </div>
             <div className="breadth" aria-label="Market breadth">
@@ -284,7 +308,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         </aside>
 
         <section className="exchange-tools" aria-label="Merchant tools">
-          <article className="tool-card price-book">
+          <article className="tool-card price-book" id="price-book">
             <div className="section-label">Merchant’s Price Book</div>
             <h2>Individual Minecraft wares</h2>
             <p className="tool-intro">Search {number(MINECRAFT_ITEM_COUNT, 0)} individual vanilla {MINECRAFT_VERSION} items. Each entry shows its responsible issuer and linked simulated market quote.</p>
@@ -303,7 +327,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             </div>
           </article>
 
-          <article className="tool-card personal-ledger">
+          <article className="tool-card personal-ledger" id="my-ledger">
             <div className="section-label">Personal Merchant’s Ledger</div>
             <h2>Your watched companies</h2>
             <p className="tool-intro">Pinned only on this device. Nothing here is sent to Minecraft or the public exchange.</p>
@@ -320,7 +344,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
           </article>
         </section>
 
-        <section className="listings" aria-labelledby="listings-title">
+        <section className="listings" id="official-list" aria-labelledby="listings-title">
           <div className="listings-head">
             <div><div className="section-label">Daily Official List</div><h2 id="listings-title">Guilds and Companies</h2></div>
             <label className="search"><span className="sr-only">Search guilds, trades and wares</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search guild, trade or ware" /></label>
@@ -366,7 +390,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       })()}
 
       <footer>
-        <div><strong>Royal Exchange</strong><span>Simulated market · recorded observations</span><a className="api-link" href="/api/market">Public data feed</a></div>
+        <div><strong>Royal Exchange</strong><span>Fictional Crown market · continuously simulated · observations recorded as published</span><a className="api-link" href="/api/market">Public market data API</a></div>
         <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
         <div><span>As of</span><time dateTime={snapshot.asOf}>{utcTime(snapshot.asOf)} UTC</time></div>
       </footer>
