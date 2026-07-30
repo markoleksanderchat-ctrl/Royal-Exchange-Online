@@ -63,7 +63,10 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(market.status, "OPEN");
   assert.equal(market.mode, "autonomous-wall-clock");
   assert.equal(market.simulation, true);
-  assert.equal(market.modelVersion, "royal-exchange-simulation-v1");
+  assert.equal(market.modelVersion, "royal-exchange-simulation-v2-anomalies");
+  assert.ok(Array.isArray(market.events));
+  assert.equal(typeof market.event.id, "string");
+  assert.equal(typeof market.event.severity, "string");
   assert.equal(market.historyMode, "unavailable");
   assert.equal(market.recordedObservations, 0);
   assert.equal(market.companies.length, 38);

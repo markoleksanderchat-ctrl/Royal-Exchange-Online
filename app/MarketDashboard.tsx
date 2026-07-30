@@ -285,10 +285,10 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         <aside className="market-rail" aria-label="Market briefing">
           <section className="briefing-card">
             <div className="section-label">Simulated market notice</div>
-            <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.tone === "positive" ? "Supportive" : snapshot.event.tone === "negative" ? "Adverse" : "Neutral"}</span>
+            <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.severity === "routine" ? "Routine conditions" : `${snapshot.event.severity} · ${snapshot.event.phase}`}</span>
             <h2>{snapshot.event.title}</h2>
             <p>{snapshot.event.description}</p>
-            <small>Affected: {snapshot.event.sector}</small>
+            <small>Affected: {snapshot.event.sector}{snapshot.event.impactPercent !== 0 ? ` · ${snapshot.event.impactPercent > 0 ? "+" : ""}${snapshot.event.impactPercent.toFixed(2)}%` : ""}</small>
           </section>
           <section className="rail-card">
             <div className="section-label">Market summary</div>

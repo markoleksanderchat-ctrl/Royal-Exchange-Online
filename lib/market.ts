@@ -20,10 +20,36 @@ export type ListedCompany = {
 };
 
 export type MarketEvent = {
+  id: string;
   title: string;
   description: string;
   tone: "positive" | "negative" | "neutral";
+  severity: "routine" | AnomalySeverity;
+  phase: "quiet" | "onset" | "peak" | "recovery";
   sector: string;
+  affectedTickers: string[];
+  impactPercent: number;
+  startedAt: string | null;
+  endsAt: string | null;
+};
+
+export type AnomalySeverity = "notice" | "material" | "severe" | "crisis";
+export type AnomalyShape = "shock" | "squeeze" | "wave";
+
+export type ActiveMarketAnomaly = {
+  id: string;
+  templateKey: string;
+  title: string;
+  description: string;
+  tone: "positive" | "negative";
+  severity: AnomalySeverity;
+  sector: string;
+  affectedTickers: string[];
+  peakImpactPercent: number;
+  shape: AnomalyShape;
+  startedAtEpochMillis: number;
+  peaksAtEpochMillis: number;
+  endsAtEpochMillis: number;
 };
 
 export type MarketSnapshot = {
@@ -47,6 +73,7 @@ export type MarketSnapshot = {
   declining: number;
   unchanged: number;
   event: MarketEvent;
+  events: MarketEvent[];
   companies: ListedCompany[];
 };
 
@@ -105,49 +132,87 @@ const COMPANIES: CompanyDefinition[] = [
   { ticker: "UPHL", name: "Cornhill Upholders", sector: "Furnishings", influence: "Beds, paintings, item frames, armour stands & household decoration", base: 63.6, volatility: 0.046, weight: 0.76, phase: 3.18 },
 ];
 
-const EVENTS: Array<Omit<MarketEvent, "sector"> & { sectors: string[]; direction: number }> = [
-  { title: "Wool receipts rise at the staple", description: "A larger consignment has cleared inspection, lifting turnover in staple wares.", tone: "positive", sectors: ["Staple Trade", "Textiles"], direction: 1 },
-  { title: "Pepper convoy reaches the quay", description: "Fresh spice and grain cargoes have eased prices among the victualling trades.", tone: "negative", sectors: ["Provisions", "Victuals"], direction: -1 },
-  { title: "Assay reports firmer bullion", description: "The wardens report sound weight and fineness in the latest plate and coin.", tone: "positive", sectors: ["Bullion"], direction: 1 },
-  { title: "Road tolls delay building stone", description: "Carters report slower passage and higher charges on heavy wares.", tone: "negative", sectors: ["Building", "Metals"], direction: -1 },
-  { title: "Guildhall issues new work orders", description: "Public works contracts are supporting demand for iron, leather and masonry.", tone: "positive", sectors: ["Metals", "Leatherwork", "Building"], direction: 1 },
-  { title: "Wax supply holds steady", description: "Chandlers report sufficient stores for the present market period.", tone: "neutral", sectors: ["Lighting"], direction: 0 },
-];
-
 function hash(value: number): number {
   const x = Math.sin(value * 12.9898 + 78.233) * 43758.5453;
   return x - Math.floor(x);
 }
 
-function activeEvent(time: number): MarketEvent & { direction: number } {
-  const block = Math.floor(time / (6 * 60 * MINUTE));
-  const event = EVENTS[Math.floor(hash(block * 1.913) * EVENTS.length) % EVENTS.length];
-  return { title: event.title, description: event.description, tone: event.tone, sector: event.sectors.join(" · "), direction: event.direction };
+function smoothstep(value: number) {
+  const bounded = Math.max(0, Math.min(1, value));
+  return bounded * bounded * (3 - 2 * bounded);
 }
 
-function companyPrice(definition: CompanyDefinition, time: number): number {
+export function anomalyImpactAt(anomaly: ActiveMarketAnomaly, time: number): number {
+  if (time < anomaly.startedAtEpochMillis || time >= anomaly.endsAtEpochMillis) return 0;
+  const peak = Math.max(anomaly.startedAtEpochMillis + 1, anomaly.peaksAtEpochMillis);
+  const onset = (time - anomaly.startedAtEpochMillis) / (peak - anomaly.startedAtEpochMillis);
+  const recovery = (anomaly.endsAtEpochMillis - time) / Math.max(1, anomaly.endsAtEpochMillis - peak);
+  let intensity: number;
+  if (anomaly.shape === "shock") intensity = time <= peak ? Math.max(0.72, smoothstep(onset)) : smoothstep(recovery);
+  else if (anomaly.shape === "squeeze") intensity = time <= peak ? smoothstep(onset) : Math.sqrt(Math.max(0, recovery));
+  else intensity = time <= peak ? Math.sin(Math.min(1, onset) * Math.PI / 2) : Math.sin(Math.max(0, recovery) * Math.PI / 2);
+  return anomaly.peakImpactPercent * intensity;
+}
+
+function marketEvent(anomaly: ActiveMarketAnomaly, time: number): MarketEvent {
+  const impactPercent = Number(anomalyImpactAt(anomaly, time).toFixed(2));
+  const phase = time < anomaly.peaksAtEpochMillis ? "onset"
+    : time < anomaly.endsAtEpochMillis - (anomaly.endsAtEpochMillis - anomaly.peaksAtEpochMillis) * 0.68 ? "peak" : "recovery";
+  return {
+    id: anomaly.id,
+    title: anomaly.title,
+    description: anomaly.description,
+    tone: anomaly.tone,
+    severity: anomaly.severity,
+    phase,
+    sector: anomaly.sector,
+    affectedTickers: anomaly.affectedTickers,
+    impactPercent,
+    startedAt: new Date(anomaly.startedAtEpochMillis).toISOString(),
+    endsAt: new Date(anomaly.endsAtEpochMillis).toISOString(),
+  };
+}
+
+export const QUIET_EVENT: MarketEvent = {
+  id: "none",
+  title: "No exceptional market notices",
+  description: "Trading continues under ordinary conditions; the wardens report no active anomaly.",
+  tone: "neutral",
+  severity: "routine",
+  phase: "quiet",
+  sector: "All listed trades",
+  affectedTickers: [],
+  impactPercent: 0,
+  startedAt: null,
+  endsAt: null,
+};
+
+function companyPrice(definition: CompanyDefinition, time: number, anomalies: ActiveMarketAnomaly[]): number {
   const minute = Math.floor(time / MINUTE);
   const dayWave = Math.sin((time / DAY) * Math.PI * 2 + definition.phase) * definition.volatility * 0.48;
   const weekWave = Math.sin((time / (DAY * 7)) * Math.PI * 2 + definition.phase * 0.63) * definition.volatility * 0.34;
   const pulse = (hash(minute * 0.071 + definition.phase * 91) - 0.5) * definition.volatility * 0.22;
-  const event = activeEvent(time);
-  const affected = event.sector.split(" · ").includes(definition.sector);
-  const eventMove = affected ? event.direction * definition.volatility * 0.22 : 0;
-  return Number((definition.base * (1 + dayWave + weekWave + pulse + eventMove)).toFixed(2));
+  const anomalyMove = anomalies
+    .filter((anomaly) => anomaly.affectedTickers.includes(definition.ticker))
+    .reduce((sum, anomaly) => sum + anomalyImpactAt(anomaly, time) / 100, 0);
+  return Number((definition.base * Math.max(0.35, 1 + dayWave + weekWave + pulse + anomalyMove)).toFixed(2));
 }
 
-function companySnapshot(definition: CompanyDefinition, time: number): ListedCompany {
-  const price = companyPrice(definition, time);
-  const previous = companyPrice(definition, time - DAY);
+function companySnapshot(definition: CompanyDefinition, time: number, anomalies: ActiveMarketAnomaly[]): ListedCompany {
+  const price = companyPrice(definition, time, anomalies);
+  const previous = companyPrice(definition, time - DAY, anomalies);
   const date = new Date(time);
   const dayOpen = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  const open = companyPrice(definition, dayOpen);
+  const open = companyPrice(definition, dayOpen, anomalies);
   const points = [{ time: new Date(time).toISOString(), value: price }];
   const values = points.map((point) => point.value);
   const change = Number((price - previous).toFixed(2));
   const changePercent = Number(((change / previous) * 100).toFixed(2));
   const minute = Math.floor(time / MINUTE);
-  const volume = Math.round((82_000 + hash(minute * 0.017 + definition.phase * 300) * 290_000) * definition.weight);
+  const eventVolume = anomalies.filter((anomaly) => anomaly.affectedTickers.includes(definition.ticker))
+    .reduce((sum, anomaly) => sum + Math.abs(anomalyImpactAt(anomaly, time)) * 0.025, 1);
+  const volume = Math.round((82_000 + hash(minute * 0.017 + definition.phase * 300) * 290_000)
+    * definition.weight * Math.min(1.85, eventVolume));
   return {
     ticker: definition.ticker,
     name: definition.name,
@@ -165,25 +230,27 @@ function companySnapshot(definition: CompanyDefinition, time: number): ListedCom
   };
 }
 
-export function getMarketSnapshot(at = new Date()): MarketSnapshot {
+export function getMarketSnapshot(at = new Date(), anomalies: ActiveMarketAnomaly[] = []): MarketSnapshot {
   const time = at.getTime();
   const tick = Math.floor(time / MINUTE);
-  const companies = COMPANIES.map((company) => companySnapshot(company, time));
+  const companies = COMPANIES.map((company) => companySnapshot(company, time, anomalies));
   const weightedBase = COMPANIES.reduce((sum, company) => sum + company.base * company.weight, 0);
   const weightedCurrent = companies.reduce((sum, company, index) => sum + company.price * COMPANIES[index].weight, 0);
-  const weightedPrevious = COMPANIES.reduce((sum, company, index) => sum + companyPrice(company, time - DAY) * COMPANIES[index].weight, 0);
+  const weightedPrevious = COMPANIES.reduce((sum, company, index) => sum + companyPrice(company, time - DAY, anomalies) * COMPANIES[index].weight, 0);
   const composite = Number(((weightedCurrent / weightedBase) * 1000).toFixed(2));
   const previousComposite = (weightedPrevious / weightedBase) * 1000;
   const compositeChange = Number((composite - previousComposite).toFixed(2));
   const compositeChangePercent = Number(((compositeChange / previousComposite) * 100).toFixed(2));
   const advancing = companies.filter((company) => company.change > 0.005).length;
   const declining = companies.filter((company) => company.change < -0.005).length;
-  const event = activeEvent(time);
+  const events = anomalies.map((anomaly) => marketEvent(anomaly, time))
+    .filter((event) => Math.abs(event.impactPercent) >= 0.01)
+    .sort((left, right) => Math.abs(right.impactPercent) - Math.abs(left.impactPercent));
   return {
     exchange: "Royal Exchange",
     mode: "autonomous-wall-clock",
     simulation: true,
-    modelVersion: "royal-exchange-simulation-v1",
+    modelVersion: "royal-exchange-simulation-v2-anomalies",
     historyMode: "unavailable",
     recordedFrom: null,
     recordedObservations: 0,
@@ -199,7 +266,8 @@ export function getMarketSnapshot(at = new Date()): MarketSnapshot {
     advancing,
     declining,
     unchanged: companies.length - advancing - declining,
-    event: { title: event.title, description: event.description, tone: event.tone, sector: event.sector },
+    event: events[0] ?? QUIET_EVENT,
+    events,
     companies,
   };
 }

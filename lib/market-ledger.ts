@@ -1,4 +1,5 @@
-import { getMarketSnapshot, type ListedCompany, type MarketEvent, type MarketHistoryPoint, type MarketSnapshot } from "./market";
+import { anomalySchemaStatements, resolveMarketAnomalies } from "./anomalies";
+import { getMarketSnapshot, QUIET_EVENT, type ListedCompany, type MarketEvent, type MarketHistoryPoint, type MarketSnapshot } from "./market";
 
 const MINUTE = 60_000;
 const DAY_MINUTES = 24 * 60;
@@ -27,6 +28,7 @@ export const marketSchemaStatements = [
   )`,
   "CREATE INDEX IF NOT EXISTS issuer_ticks_ticker_tick_idx ON issuer_ticks (ticker, tick)",
   "CREATE INDEX IF NOT EXISTS issuer_ticks_observed_at_idx ON issuer_ticks (observed_at)",
+  ...anomalySchemaStatements,
 ] as const;
 
 type IssuerRow = {
@@ -51,13 +53,14 @@ export async function ensureMarketSchema(db: D1Database) {
 
 export async function recordMarketTick(db: D1Database, at = new Date()) {
   await ensureMarketSchema(db);
-  const snapshot = getMarketSnapshot(at);
+  const anomalies = await resolveMarketAnomalies(db, at.getTime());
+  const snapshot = getMarketSnapshot(at, anomalies);
   const statements = [
     db.prepare(`INSERT OR IGNORE INTO market_ticks
       (tick, observed_at, composite, total_volume, model_version, event_json)
       VALUES (?, ?, ?, ?, ?, ?)`)
       .bind(snapshot.tick, snapshot.asOf, snapshot.composite, snapshot.totalVolume, snapshot.modelVersion,
-        JSON.stringify(snapshot.event)),
+        JSON.stringify({ event: snapshot.event, events: snapshot.events })),
     ...snapshot.companies.map((company) => db.prepare(`INSERT OR IGNORE INTO issuer_ticks
       (tick, ticker, name, sector, influence, observed_at, price, volume)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -138,12 +141,15 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     : Number(((compositeChange / previousComposite) * 100).toFixed(2));
   const advancing = companies.filter((company) => company.change > 0.005).length;
   const declining = companies.filter((company) => company.change < -0.005).length;
+  const storedEvent = JSON.parse(currentMarket.event_json) as MarketEvent | { event?: MarketEvent; events?: MarketEvent[] };
+  const event = "event" in storedEvent ? storedEvent.event ?? QUIET_EVENT : storedEvent;
+  const events = "event" in storedEvent ? storedEvent.events ?? (event.id === "none" ? [] : [event]) : [];
 
   return {
     exchange: "Royal Exchange",
     mode: "autonomous-wall-clock",
     simulation: true,
-    modelVersion: "royal-exchange-simulation-v1",
+    modelVersion: "royal-exchange-simulation-v2-anomalies",
     historyMode: "recorded-ledger",
     recordedFrom: ledger?.recorded_from ?? currentMarket.observed_at,
     recordedObservations: ledger?.observations ?? 1,
@@ -159,7 +165,8 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     advancing,
     declining,
     unchanged: companies.length - advancing - declining,
-    event: JSON.parse(currentMarket.event_json) as MarketEvent,
+    event,
+    events,
     companies,
   };
 }
