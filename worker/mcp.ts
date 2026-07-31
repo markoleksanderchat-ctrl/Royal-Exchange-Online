@@ -1,14 +1,18 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
-import { charterRecord, standingFor } from "../app/market-records";
-import { MINECRAFT_ITEMS, MINECRAFT_ITEM_COUNT, MINECRAFT_VERSION } from "../app/minecraft-items";
-import { getMarketSnapshot, type ListedCompany, type MarketSnapshot } from "../lib/market";
-import { getRecordedMarketSnapshot } from "../lib/market-ledger";
-
-type MarketDataEnv = {
-  DB?: D1Database;
-};
+import { MINECRAFT_ITEM_COUNT, MINECRAFT_VERSION } from "../app/minecraft-items";
+import {
+  compareIssuers,
+  errorPayload,
+  findMinecraftWares,
+  getIssuer,
+  getNotices,
+  getOverview,
+  searchMarket,
+  type HistoryPeriod,
+  type MarketDataEnv,
+} from "./market-query";
 
 const READ_ONLY = {
   readOnlyHint: true,
@@ -31,19 +35,6 @@ const MCP_ORIGINS = [
   "chat.openai.com",
 ];
 
-async function marketSnapshot(env: MarketDataEnv): Promise<MarketSnapshot> {
-  if (!env.DB) return getMarketSnapshot();
-  try {
-    return await getRecordedMarketSnapshot(env.DB, new Date());
-  } catch (error) {
-    console.error(JSON.stringify({
-      message: "Royal Exchange MCP ledger unavailable",
-      error: error instanceof Error ? error.message : String(error),
-    }));
-    return getMarketSnapshot();
-  }
-}
-
 function jsonResult(data: Record<string, unknown>) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -51,40 +42,23 @@ function jsonResult(data: Record<string, unknown>) {
   };
 }
 
-function errorResult(message: string) {
-  return {
-    isError: true,
-    content: [{ type: "text" as const, text: message }],
-  };
-}
-
-function compactCompany(company: ListedCompany) {
-  return {
-    ticker: company.ticker,
-    name: company.name,
-    sector: company.sector,
-    principalTrade: company.influence,
-    priceCrowns: company.price,
-    changeCrowns: company.change,
-    changePercent: company.changePercent,
-    volume: company.volume,
-  };
-}
-
-function companySearchText(company: ListedCompany) {
-  return `${company.ticker} ${company.name} ${company.sector} ${company.influence}`.toLowerCase();
-}
-
-function findCompany(companies: ListedCompany[], identifier: string) {
-  const needle = identifier.trim().toLowerCase();
-  return companies.find((company) => company.ticker.toLowerCase() === needle || company.name.toLowerCase() === needle)
-    ?? companies.find((company) => companySearchText(company).includes(needle));
+async function queryResult(work: Promise<Record<string, unknown>>) {
+  try {
+    return jsonResult(await work);
+  } catch (error) {
+    const result = errorPayload(error, crypto.randomUUID());
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: JSON.stringify(result.body, null, 2) }],
+      structuredContent: result.body,
+    };
+  }
 }
 
 function createRoyalExchangeServer(env: MarketDataEnv) {
   const server = new McpServer({
     name: "Royal Exchange",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   server.registerTool("get_market_overview", {
@@ -93,36 +67,7 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     inputSchema: z.object({}),
     annotations: READ_ONLY,
   }, async () => {
-    const snapshot = await marketSnapshot(env);
-    const largestMoves = [...snapshot.companies]
-      .sort((left, right) => Math.abs(right.changePercent) - Math.abs(left.changePercent))
-      .slice(0, 5)
-      .map(compactCompany);
-    return jsonResult({
-      exchange: snapshot.exchange,
-      simulated: snapshot.simulation,
-      status: snapshot.status,
-      asOf: snapshot.asOf,
-      currency: snapshot.currency,
-      composite: snapshot.composite,
-      compositeChange: snapshot.compositeChange,
-      compositeChangePercent: snapshot.compositeChangePercent,
-      totalVolume: snapshot.totalVolume,
-      breadth: {
-        advancing: snapshot.advancing,
-        declining: snapshot.declining,
-        unchanged: snapshot.unchanged,
-      },
-      listedIssuers: snapshot.companies.length,
-      history: {
-        mode: snapshot.historyMode,
-        recordedFrom: snapshot.recordedFrom,
-        observations: snapshot.recordedObservations,
-      },
-      currentNotice: snapshot.event,
-      largestMoves,
-      source: "https://royalexchange.net/",
-    });
+    return queryResult(getOverview(env));
   });
 
   server.registerTool("search_market", {
@@ -134,15 +79,7 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     }),
     annotations: READ_ONLY,
   }, async ({ query, limit }) => {
-    const snapshot = await marketSnapshot(env);
-    const needle = query.toLowerCase();
-    const matches = snapshot.companies.filter((company) => companySearchText(company).includes(needle)).slice(0, limit);
-    return jsonResult({
-      query,
-      asOf: snapshot.asOf,
-      matchCount: matches.length,
-      matches: matches.map(compactCompany),
-    });
+    return queryResult(searchMarket(env, query, limit));
   });
 
   server.registerTool("get_issuer", {
@@ -150,29 +87,12 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     description: "Read one stock's current quote, recorded price history, principal Minecraft wares, and fictional historical charter lore.",
     inputSchema: z.object({
       identifier: z.string().trim().min(1).max(100).describe("Ticker or part of the issuer name, sector, or principal trade."),
+      period: z.enum(["1h", "6h", "24h", "7d"]).default("24h").describe("Historical performance window to summarize."),
       historyPoints: z.number().int().min(1).max(120).default(48).describe("Most recent recorded price points to return."),
     }),
     annotations: READ_ONLY,
-  }, async ({ identifier, historyPoints }) => {
-    const snapshot = await marketSnapshot(env);
-    const company = findCompany(snapshot.companies, identifier);
-    if (!company) return errorResult(`No Royal Exchange issuer matches "${identifier}".`);
-    const lore = charterRecord(company);
-    return jsonResult({
-      asOf: snapshot.asOf,
-      simulated: true,
-      issuer: {
-        ...compactCompany(company),
-        sessionOpen: company.open,
-        previousClose: company.previousClose,
-        high: company.high,
-        low: company.low,
-        standing: standingFor(company),
-        charter: lore,
-        history: company.history.slice(-historyPoints),
-      },
-      activeNotices: snapshot.events.filter((event) => event.affectedTickers.includes(company.ticker)),
-    });
+  }, async ({ identifier, period, historyPoints }) => {
+    return queryResult(getIssuer(env, identifier, period as HistoryPeriod, historyPoints));
   });
 
   server.registerTool("compare_issuers", {
@@ -183,22 +103,7 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     }),
     annotations: READ_ONLY,
   }, async ({ identifiers }) => {
-    const snapshot = await marketSnapshot(env);
-    const companies = identifiers.map((identifier) => findCompany(snapshot.companies, identifier));
-    const missing = identifiers.filter((_identifier, index) => !companies[index]);
-    if (missing.length > 0) return errorResult(`No issuer matched: ${missing.join(", ")}.`);
-    return jsonResult({
-      asOf: snapshot.asOf,
-      simulated: true,
-      comparison: companies.filter((company): company is ListedCompany => Boolean(company)).map((company) => ({
-        ...compactCompany(company),
-        sessionOpen: company.open,
-        previousClose: company.previousClose,
-        high: company.high,
-        low: company.low,
-        standing: standingFor(company),
-      })),
-    });
+    return queryResult(compareIssuers(env, identifiers));
   });
 
   server.registerTool("get_market_notices", {
@@ -209,16 +114,7 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     }),
     annotations: READ_ONLY,
   }, async ({ moverLimit }) => {
-    const snapshot = await marketSnapshot(env);
-    return jsonResult({
-      asOf: snapshot.asOf,
-      simulated: true,
-      notices: snapshot.events.length > 0 ? snapshot.events : [snapshot.event],
-      largestMoves: [...snapshot.companies]
-        .sort((left, right) => Math.abs(right.changePercent) - Math.abs(left.changePercent))
-        .slice(0, moverLimit)
-        .map(compactCompany),
-    });
+    return queryResult(getNotices(env, moverLimit));
   });
 
   server.registerTool("find_minecraft_wares", {
@@ -230,28 +126,7 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     }),
     annotations: READ_ONLY,
   }, async ({ query, limit }) => {
-    const snapshot = await marketSnapshot(env);
-    const companies = new Map(snapshot.companies.map((company) => [company.ticker, company]));
-    const needle = query.toLowerCase();
-    const matches = MINECRAFT_ITEMS
-      .filter((item) => `${item.name} ${item.id}`.toLowerCase().includes(needle))
-      .slice(0, limit)
-      .map((item) => {
-        const company = companies.get(item.ticker);
-        return {
-          name: item.name,
-          registryId: `minecraft:${item.id}`,
-          issuer: company ? compactCompany(company) : { ticker: item.ticker },
-        };
-      });
-    return jsonResult({
-      query,
-      minecraftVersion: MINECRAFT_VERSION,
-      totalCatalogSize: MINECRAFT_ITEM_COUNT,
-      matchCount: matches.length,
-      matches,
-      asOf: snapshot.asOf,
-    });
+    return queryResult(findMinecraftWares(env, query, limit));
   });
 
   return server;

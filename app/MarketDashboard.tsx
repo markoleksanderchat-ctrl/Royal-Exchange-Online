@@ -458,7 +458,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       })()}
 
       <footer>
-        <div><strong>Royal Exchange</strong><span>Fictional Crown market · continuously simulated · observations recorded as published</span><a className="api-link" href="/api/market">Public market data API</a></div>
+        <div><strong>Royal Exchange</strong><span>Fictional Crown market · continuously simulated · observations recorded as published</span><a className="api-link" href="/api/market">Public market data API</a><a className="api-link" href="/openapi.json">ChatGPT OpenAPI schema</a></div>
         <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
         <div><span>As of</span><time dateTime={snapshot.asOf}>{utcTime(snapshot.asOf)} UTC</time></div>
       </footer>

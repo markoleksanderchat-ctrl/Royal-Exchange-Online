@@ -173,3 +173,25 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     companies,
   };
 }
+
+export async function getRecordedIssuerHistory(
+  db: D1Database,
+  ticker: string,
+  periodMinutes: number,
+  maximumPoints = 120,
+): Promise<MarketHistoryPoint[]> {
+  const currentTick = Math.floor(Date.now() / MINUTE);
+  const rows = await db.prepare(`SELECT observed_at, price
+    FROM issuer_ticks
+    WHERE ticker = ? AND tick >= ?
+    ORDER BY tick`)
+    .bind(ticker, currentTick - periodMinutes)
+    .all<{ observed_at: string; price: number }>();
+  const points = rows.results.map((row) => ({ time: row.observed_at, value: row.price }));
+  if (points.length <= maximumPoints) return points;
+  const stride = Math.ceil(points.length / maximumPoints);
+  const sampled = points.filter((_point, index) => index % stride === 0);
+  const latest = points.at(-1);
+  if (latest && sampled.at(-1)?.time !== latest.time) sampled.push(latest);
+  return sampled.slice(-maximumPoints);
+}

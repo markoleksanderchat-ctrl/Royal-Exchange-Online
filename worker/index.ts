@@ -4,7 +4,9 @@ import handler from "vinext/server/app-router-entry";
 import { getMarketSnapshot } from "../lib/market";
 import { getRecordedMarketSnapshot, recordMarketTick } from "../lib/market-ledger";
 import { handleAssistantApi } from "./assistant-api";
+import { handleAssistantV1 } from "./assistant-v1";
 import { handleRoyalExchangeMcp } from "./mcp";
+import { handleOpenApi } from "./openapi";
 
 interface Env {
   ASSETS: Fetcher;
@@ -41,6 +43,14 @@ const worker = {
 
     if (url.pathname === "/api/assistant") {
       return handleAssistantApi(request, env);
+    }
+
+    if (url.pathname.startsWith("/api/v1/")) {
+      return handleAssistantV1(request, env);
+    }
+
+    if (url.pathname === "/openapi.json") {
+      return handleOpenApi(request);
     }
 
     if (url.pathname === "/mcp") {

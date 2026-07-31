@@ -47,6 +47,8 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /Whittington Mercery/);
   assert.match(html, /Walworth &amp; Lovekyn Fish House/);
   assert.match(html, /\/api\/market/);
+  assert.match(html, /ChatGPT OpenAPI schema/);
+  assert.match(html, /\/openapi\.json/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|Your site is taking shape|signin-with-chatgpt/i);
 });
@@ -96,8 +98,10 @@ test("publishes a compact read-only assistant API", async () => {
   assert.equal(overview.mode, "overview");
   assert.equal(overview.simulated, true);
   assert.equal(overview.listedIssuers, 38);
-  assert.equal(overview.matches.length, 38);
-  assert.equal(overview.matches[0].history, undefined);
+  assert.equal(overview.matches.length, 0);
+  assert.equal(overview.meta.apiVersion, "1.0");
+  assert.equal(overview.meta.degraded, true);
+  assert.ok(JSON.stringify(overview).length < 5_000);
 
   const issuerResponse = await app.fetch(new Request("https://exchange.example/api/assistant?identifier=WIRE&historyPoints=4"), environment, context);
   assert.equal(issuerResponse.status, 200);
@@ -112,6 +116,47 @@ test("publishes a compact read-only assistant API", async () => {
   const search = await searchResponse.json();
   assert.equal(search.mode, "search");
   assert.ok(search.matches.some((company) => company.ticker === "WIRE"));
+});
+
+test("publishes explicit compact ChatGPT operations and OpenAPI", async () => {
+  const app = await worker();
+  const overviewResponse = await app.fetch(new Request("https://exchange.example/api/v1/overview"), environment, context);
+  assert.equal(overviewResponse.status, 200);
+  assert.equal(overviewResponse.headers.get("x-royal-exchange-api-version"), "1.0");
+  assert.match(overviewResponse.headers.get("x-request-id") ?? "", /^[0-9a-f-]{36}$/i);
+  const overview = await overviewResponse.json();
+  assert.equal(overview.largestMoves.length, 5);
+  assert.equal(overview.meta.dataMode, "fallback-simulation");
+  assert.equal(overview.meta.degraded, true);
+  assert.ok(JSON.stringify(overview).length < 5_000);
+
+  const issuerResponse = await app.fetch(new Request("https://exchange.example/api/v1/issuers/WIRE?period=6h&historyPoints=12"), environment, context);
+  assert.equal(issuerResponse.status, 200);
+  const issuer = await issuerResponse.json();
+  assert.equal(issuer.issuer.ticker, "WIRE");
+  assert.equal(issuer.issuer.performance.period, "6h");
+  assert.equal(issuer.issuer.performance.completePeriod, false);
+  assert.ok(issuer.issuer.history.length <= 12);
+
+  const ambiguousResponse = await app.fetch(new Request("https://exchange.example/api/v1/issuers/Food"), environment, context);
+  assert.equal(ambiguousResponse.status, 409);
+  const ambiguous = await ambiguousResponse.json();
+  assert.equal(ambiguous.error.code, "ambiguous_issuer");
+  assert.ok(ambiguous.error.candidates.length > 1);
+
+  const openApiResponse = await app.fetch(new Request("https://exchange.example/openapi.json"), environment, context);
+  assert.equal(openApiResponse.status, 200);
+  const openApi = await openApiResponse.json();
+  assert.equal(openApi.openapi, "3.1.0");
+  assert.deepEqual(Object.values(openApi.paths).map((path) => path.get.operationId), [
+    "getRoyalExchangeOverview",
+    "searchRoyalExchange",
+    "getRoyalExchangeIssuer",
+    "compareRoyalExchangeIssuers",
+    "getRoyalExchangeNotices",
+    "findRoyalExchangeMinecraftWares",
+  ]);
+  assert.ok(Object.values(openApi.paths).every((path) => path.get && !path.post && !path.put && !path.patch && !path.delete));
 });
 
 test("removes starter assets and packages production metadata", async () => {
@@ -159,9 +204,11 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(mcp, /readOnlyHint: true/);
   assert.match(mcp, /find_minecraft_wares/);
   assert.match(assistantApi, /handleAssistantApi/);
-  assert.match(assistantApi, /charterRecord/);
+  assert.match(assistantApi, /getLegacyAssistantResponse/);
   assert.match(workerEntry, /url\.pathname === "\/mcp"/);
   assert.match(workerEntry, /url\.pathname === "\/api\/assistant"/);
+  assert.match(workerEntry, /url\.pathname\.startsWith\("\/api\/v1\/"\)/);
+  assert.match(workerEntry, /url\.pathname === "\/openapi\.json"/);
   assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

@@ -1,0 +1,12 @@
+[
+  { "prompt": "How is the Royal Exchange doing right now?", "operationId": "getRoyalExchangeOverview" },
+  { "prompt": "What are today's biggest movers?", "operationId": "getRoyalExchangeOverview" },
+  { "prompt": "Find the company responsible for redstone trade.", "operationId": "searchRoyalExchange" },
+  { "prompt": "What is WIRE trading at?", "operationId": "getRoyalExchangeIssuer" },
+  { "prompt": "How has WIRE performed over the last six hours?", "operationId": "getRoyalExchangeIssuer", "period": "6h" },
+  { "prompt": "Give me the seven-day performance for IRON.", "operationId": "getRoyalExchangeIssuer", "period": "7d" },
+  { "prompt": "Compare WIRE and IRON.", "operationId": "compareRoyalExchangeIssuers" },
+  { "prompt": "Are there any active market anomalies?", "operationId": "getRoyalExchangeNotices" },
+  { "prompt": "Which stock covers minecraft:redstone?", "operationId": "findRoyalExchangeMinecraftWares" },
+  { "prompt": "Who handles music discs?", "operationId": "findRoyalExchangeMinecraftWares" }
+]
