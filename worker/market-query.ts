@@ -172,7 +172,7 @@ export async function searchMarket(env: MarketDataEnv, query: string, limit = 10
     meta: meta(loaded, requestId),
     query,
     matchCount: matches.length,
-    matches: matches.map(compactCompany),
+    matches,
   };
 }
 
@@ -252,7 +252,7 @@ export async function findMinecraftWares(env: MarketDataEnv, query: string, limi
     minecraftVersion: MINECRAFT_VERSION,
     totalCatalogSize: MINECRAFT_ITEM_COUNT,
     matchCount: matches.length,
-    matches: matches.map(compactCompany),
+    matches,
   };
 }
 
@@ -314,7 +314,7 @@ export async function getLegacyAssistantResponse(
     largestMoves,
     query: query ?? null,
     matchCount: matches.length,
-    matches,
+    matches: matches.map(compactCompany),
   };
 }
 
