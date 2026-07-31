@@ -172,7 +172,7 @@ export async function searchMarket(env: MarketDataEnv, query: string, limit = 10
     meta: meta(loaded, requestId),
     query,
     matchCount: matches.length,
-    matches,
+    matches: matches.map(compactCompany),
   };
 }
 

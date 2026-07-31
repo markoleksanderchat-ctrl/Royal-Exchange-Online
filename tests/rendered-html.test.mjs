@@ -132,6 +132,12 @@ test("publishes explicit compact ChatGPT operations and OpenAPI", async () => {
   assert.equal(overview.meta.degraded, true);
   assert.ok(JSON.stringify(overview).length < 5_000);
 
+  const v1SearchResponse = await app.fetch(new Request("https://exchange.example/api/v1/search?query=redstone"), environment, context);
+  assert.equal(v1SearchResponse.status, 200);
+  const v1Search = await v1SearchResponse.json();
+  assert.equal(v1Search.matches[0].history, undefined);
+  assert.ok(JSON.stringify(v1Search).length < 5_000);
+
   const issuerResponse = await app.fetch(new Request("https://exchange.example/api/v1/issuers/WIRE?period=6h&historyPoints=12"), environment, context);
   assert.equal(issuerResponse.status, 200);
   const issuer = await issuerResponse.json();
