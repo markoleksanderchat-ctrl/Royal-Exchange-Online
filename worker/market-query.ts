@@ -252,7 +252,7 @@ export async function findMinecraftWares(env: MarketDataEnv, query: string, limi
     minecraftVersion: MINECRAFT_VERSION,
     totalCatalogSize: MINECRAFT_ITEM_COUNT,
     matchCount: matches.length,
-    matches,
+    matches: matches.map(compactCompany),
   };
 }
 

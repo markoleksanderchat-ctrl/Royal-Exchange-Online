@@ -116,6 +116,8 @@ test("publishes a compact read-only assistant API", async () => {
   const search = await searchResponse.json();
   assert.equal(search.mode, "search");
   assert.ok(search.matches.some((company) => company.ticker === "WIRE"));
+  assert.equal(search.matches[0].history, undefined);
+  assert.ok(JSON.stringify(search).length < 5_000);
 });
 
 test("publishes explicit compact ChatGPT operations and OpenAPI", async () => {
