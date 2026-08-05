@@ -87,7 +87,7 @@ function createRoyalExchangeServer(env: MarketDataEnv) {
     description: "Read one stock's current quote, recorded price history, principal Minecraft wares, and fictional historical charter lore.",
     inputSchema: z.object({
       identifier: z.string().trim().min(1).max(100).describe("Ticker or part of the issuer name, sector, or principal trade."),
-      period: z.enum(["1h", "6h", "24h", "7d"]).default("24h").describe("Historical performance window to summarize."),
+      period: z.enum(["1h", "6h", "24h", "7d", "30d", "all"]).default("24h").describe("Historical performance window to summarize."),
       historyPoints: z.number().int().min(1).max(120).default(48).describe("Most recent recorded price points to return."),
     }),
     annotations: READ_ONLY,

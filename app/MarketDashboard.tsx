@@ -9,6 +9,14 @@ const LEDGER_KEY = "royal-exchange-merchant-ledger-v1";
 const THEME_KEY = "royal-exchange-theme-v1";
 const FEATURED_ITEM_IDS = ["diamond", "redstone", "white_wool", "music_disc_13", "filled_map", "potion", "iron_ingot", "oak_log"];
 type ThemeMode = "light" | "dark";
+type HistoryRange = "24h" | "7d" | "30d" | "all";
+
+const HISTORY_RANGES: Array<{ value: HistoryRange; label: string }> = [
+  { value: "24h", label: "1D" },
+  { value: "7d", label: "7D" },
+  { value: "30d", label: "30D" },
+  { value: "all", label: "ALL" },
+];
 
 function number(value: number, digits = 2) {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
@@ -166,6 +174,14 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const [charterTicker, setCharterTicker] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themeReady, setThemeReady] = useState(false);
+  const [historyRange, setHistoryRange] = useState<HistoryRange>("7d");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyView, setHistoryView] = useState<{
+    ticker: string;
+    range: HistoryRange;
+    points: MarketHistoryPoint[];
+    changeCrowns: number | null;
+  } | null>(null);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -234,6 +250,42 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   }, [charterTicker]);
 
   const selected = snapshot.companies.find((company) => company.ticker === selectedTicker) ?? snapshot.companies[0];
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadHistory = async () => {
+      setHistoryLoading(true);
+      try {
+        const response = await fetch(`/api/v1/issuers/${encodeURIComponent(selected.ticker)}?period=${historyRange}&historyPoints=120`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const payload = await response.json() as {
+          issuer: {
+            history: MarketHistoryPoint[];
+            performance: { changeCrowns: number | null };
+          };
+        };
+        setHistoryView({
+          ticker: selected.ticker,
+          range: historyRange,
+          points: payload.issuer.history,
+          changeCrowns: payload.issuer.performance.changeCrowns,
+        });
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          // Keep the last valid chart visible through transient network loss.
+        }
+      } finally {
+        if (!controller.signal.aborted) setHistoryLoading(false);
+      }
+    };
+    void loadHistory();
+    return () => controller.abort();
+  }, [historyRange, selected.ticker]);
+  const activeHistory = historyView?.ticker === selected.ticker && historyView.range === historyRange ? historyView : null;
+  const chartHistory = activeHistory?.points ?? selected.history;
+  const chartPositive = (activeHistory?.changeCrowns ?? selected.change) >= 0;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return snapshot.companies;
@@ -335,8 +387,25 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div><span className="ticker-badge">{selected.ticker}</span><h2>{selected.name}</h2><p>{selected.sector} · {selected.influence}</p></div>
               <div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><Move value={selected.changePercent} /></div>
             </div>
-            <Chart points={selected.history} positive={selected.change >= 0} theme={theme} />
-            <div className="chart-labels"><span>{selected.history.length > 1 ? "First recorded" : "Recording started"}</span><span>Now</span></div>
+            <div className="history-controls">
+              <div className="history-range" role="group" aria-label="Recorded history range">
+                {HISTORY_RANGES.map((range) => (
+                  <button
+                    type="button"
+                    key={range.value}
+                    className={historyRange === range.value ? "selected" : ""}
+                    aria-pressed={historyRange === range.value}
+                    onClick={() => setHistoryRange(range.value)}
+                  >{range.label}</button>
+                ))}
+              </div>
+              <div className="history-ledger-note" aria-live="polite">
+                <strong>{historyLoading ? "Loading recorded history…" : `${chartHistory.length} recorded points`}</strong>
+                <span>Ledger began {snapshot.recordedFrom ? `${utcDate(snapshot.recordedFrom)} UTC` : "when the first observation was stored"}</span>
+              </div>
+            </div>
+            <Chart points={chartHistory} positive={chartPositive} theme={theme} />
+            <div className="chart-labels"><span>{chartHistory.length > 0 ? utcDate(chartHistory[0].time) : "Recording started"}</span><span>Latest recorded</span></div>
             <div className="focus-actions">
               <button className="action-button" onClick={() => openCharter(selected.ticker)}>Read company charter</button>
               <button className="action-button secondary" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from my ledger" : "Add to my ledger"}</button>

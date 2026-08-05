@@ -42,6 +42,12 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /minecraft:[\s\S]{0,40}redstone/);
   assert.match(html, /Personal Merchant(?:’|&rsquo;)s Ledger/);
   assert.match(html, /Read company charter/);
+  assert.match(html, /Recorded history range/);
+  assert.match(html, />1D</);
+  assert.match(html, />7D</);
+  assert.match(html, />30D</);
+  assert.match(html, />ALL</);
+  assert.match(html, /Ledger began/);
   assert.match(html, /Pinned only on this device/);
   assert.match(html, /Browne of Calais Staple/);
   assert.match(html, /Whittington Mercery/);
@@ -146,6 +152,11 @@ test("publishes explicit compact ChatGPT operations and OpenAPI", async () => {
   assert.equal(issuer.issuer.performance.completePeriod, false);
   assert.ok(issuer.issuer.history.length <= 12);
 
+  const allHistoryResponse = await app.fetch(new Request("https://exchange.example/api/v1/issuers/WIRE?period=all&historyPoints=120"), environment, context);
+  assert.equal(allHistoryResponse.status, 200);
+  const allHistory = await allHistoryResponse.json();
+  assert.equal(allHistory.issuer.performance.period, "all");
+
   const ambiguousResponse = await app.fetch(new Request("https://exchange.example/api/v1/issuers/Food"), environment, context);
   assert.equal(ambiguousResponse.status, 409);
   const ambiguous = await ambiguousResponse.json();
@@ -201,6 +212,7 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(dashboard, /onPointerMove/);
   assert.match(dashboard, /ArrowLeft/);
   assert.match(dashboard, /Crowns at/);
+  assert.match(dashboard, /"24h" \| "7d" \| "30d" \| "all"/);
   assert.match(dashboard, /Fictional market charter/);
   assert.match(dashboard, /Nothing here is sent to Minecraft or the public exchange/);
   assert.match(records, /CHARTER_SEATS/);
@@ -217,7 +229,7 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(workerEntry, /url\.pathname === "\/api\/assistant"/);
   assert.match(workerEntry, /url\.pathname\.startsWith\("\/api\/v1\/"\)/);
   assert.match(workerEntry, /url\.pathname === "\/openapi\.json"/);
-  assert.deepEqual(JSON.parse(hosting), { project_id: null, d1: "DB", r2: null });
+  assert.deepEqual(JSON.parse(hosting), { project_id: "appgprj_6a73a22600c48191a52ac3a7fb165b80", d1: "DB", r2: null });
   assert.equal(socialCard, undefined);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
   await access(new URL("../dist/server/index.js", import.meta.url));

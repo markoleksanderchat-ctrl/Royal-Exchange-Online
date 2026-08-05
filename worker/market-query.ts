@@ -4,7 +4,7 @@ import { getMarketSnapshot, type ListedCompany, type MarketHistoryPoint, type Ma
 import { getRecordedIssuerHistory, getRecordedMarketSnapshot } from "../lib/market-ledger";
 
 export type MarketDataEnv = { DB?: D1Database };
-export type HistoryPeriod = "1h" | "6h" | "24h" | "7d";
+export type HistoryPeriod = "1h" | "6h" | "24h" | "7d" | "30d" | "all";
 
 export class MarketQueryError extends Error {
   constructor(
@@ -23,11 +23,13 @@ type LoadedMarket = {
   degraded: boolean;
 };
 
-const PERIOD_MINUTES: Record<HistoryPeriod, number> = {
+const PERIOD_MINUTES: Record<HistoryPeriod, number | null> = {
   "1h": 60,
   "6h": 360,
   "24h": 1_440,
   "7d": 10_080,
+  "30d": 43_200,
+  "all": null,
 };
 
 export async function loadMarket(env: MarketDataEnv): Promise<LoadedMarket> {
@@ -97,8 +99,9 @@ function performance(points: MarketHistoryPoint[], period: HistoryPeriod) {
   const first = points[0];
   const last = points.at(-1);
   const values = points.map((point) => point.value);
-  const requestedMilliseconds = PERIOD_MINUTES[period] * 60_000;
   const observedMilliseconds = first && last ? Math.max(0, Date.parse(last.time) - Date.parse(first.time)) : 0;
+  const periodMinutes = PERIOD_MINUTES[period];
+  const requestedMilliseconds = periodMinutes === null ? observedMilliseconds : periodMinutes * 60_000;
   const changeCrowns = first && last ? Number((last.value - first.value).toFixed(2)) : null;
   const changePercent = first && last && first.value !== 0
     ? Number((((last.value - first.value) / first.value) * 100).toFixed(2))
@@ -114,8 +117,10 @@ function performance(points: MarketHistoryPoint[], period: HistoryPeriod) {
     changePercent,
     highCrowns: values.length > 0 ? Math.max(...values) : null,
     lowCrowns: values.length > 0 ? Math.min(...values) : null,
-    coveragePercent: Number(Math.min(100, (observedMilliseconds / requestedMilliseconds) * 100).toFixed(1)),
-    completePeriod: observedMilliseconds >= requestedMilliseconds * 0.9,
+    coveragePercent: requestedMilliseconds > 0
+      ? Number(Math.min(100, (observedMilliseconds / requestedMilliseconds) * 100).toFixed(1))
+      : 0,
+    completePeriod: period === "all" ? points.length >= 2 : observedMilliseconds >= requestedMilliseconds * 0.9,
     sufficientData: points.length >= 2,
   };
 }
@@ -344,8 +349,8 @@ export function errorPayload(error: unknown, requestId: string) {
 
 export function parsePeriod(value: string | null): HistoryPeriod {
   if (!value) return "24h";
-  if (value === "1h" || value === "6h" || value === "24h" || value === "7d") return value;
-  throw new MarketQueryError("invalid_request", "period must be one of 1h, 6h, 24h, or 7d.", 400);
+  if (value === "1h" || value === "6h" || value === "24h" || value === "7d" || value === "30d" || value === "all") return value;
+  throw new MarketQueryError("invalid_request", "period must be one of 1h, 6h, 24h, 7d, 30d, or all.", 400);
 }
 
 export function boundedInteger(value: string | null, fallback: number, minimum: number, maximum: number) {

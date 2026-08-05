@@ -46,6 +46,7 @@ type SummaryRow = { ticker: string; high: number; low: number };
 type PriceRow = { ticker: string; price: number };
 type MarketRow = { tick: number; observed_at: string; composite: number; total_volume: number; event_json: string };
 type LedgerMeta = { recorded_from: string | null; observations: number };
+type HistoryBounds = { min_tick: number | null; max_tick: number | null; observations: number };
 
 export async function ensureMarketSchema(db: D1Database) {
   await db.batch(marketSchemaStatements.map((statement) => db.prepare(statement)));
@@ -177,16 +178,33 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
 export async function getRecordedIssuerHistory(
   db: D1Database,
   ticker: string,
-  periodMinutes: number,
+  periodMinutes: number | null,
   maximumPoints = 120,
 ): Promise<MarketHistoryPoint[]> {
-  const currentTick = Math.floor(Date.now() / MINUTE);
-  const rows = await db.prepare(`SELECT observed_at, price
-    FROM issuer_ticks
-    WHERE ticker = ? AND tick >= ?
-    ORDER BY tick`)
-    .bind(ticker, currentTick - periodMinutes)
-    .all<{ observed_at: string; price: number }>();
+  const cutoffTick = periodMinutes === null ? null : Math.floor(Date.now() / MINUTE) - periodMinutes;
+  const bounds = cutoffTick === null
+    ? await db.prepare(`SELECT MIN(tick) AS min_tick, MAX(tick) AS max_tick, COUNT(*) AS observations
+      FROM issuer_ticks WHERE ticker = ?`).bind(ticker).first<HistoryBounds>()
+    : await db.prepare(`SELECT MIN(tick) AS min_tick, MAX(tick) AS max_tick, COUNT(*) AS observations
+      FROM issuer_ticks WHERE ticker = ? AND tick >= ?`).bind(ticker, cutoffTick).first<HistoryBounds>();
+  if (!bounds?.observations || bounds.min_tick === null || bounds.max_tick === null) return [];
+
+  const sampleEvery = bounds.observations <= maximumPoints
+    ? 1
+    : Math.max(1, Math.ceil((bounds.max_tick - bounds.min_tick) / Math.max(1, maximumPoints - 2)));
+  const rows = cutoffTick === null
+    ? await db.prepare(`SELECT observed_at, price
+      FROM issuer_ticks
+      WHERE ticker = ? AND (tick = ? OR tick = ? OR tick % ? = 0)
+      ORDER BY tick`)
+      .bind(ticker, bounds.min_tick, bounds.max_tick, sampleEvery)
+      .all<{ observed_at: string; price: number }>()
+    : await db.prepare(`SELECT observed_at, price
+      FROM issuer_ticks
+      WHERE ticker = ? AND tick >= ? AND (tick = ? OR tick = ? OR tick % ? = 0)
+      ORDER BY tick`)
+      .bind(ticker, cutoffTick, bounds.min_tick, bounds.max_tick, sampleEvery)
+      .all<{ observed_at: string; price: number }>();
   const points = rows.results.map((row) => ({ time: row.observed_at, value: row.price }));
   if (points.length <= maximumPoints) return points;
   const stride = Math.ceil(points.length / maximumPoints);
