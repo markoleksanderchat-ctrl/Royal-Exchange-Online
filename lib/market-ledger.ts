@@ -189,21 +189,25 @@ export async function getRecordedIssuerHistory(
       FROM issuer_ticks WHERE ticker = ? AND tick >= ?`).bind(ticker, cutoffTick).first<HistoryBounds>();
   if (!bounds?.observations || bounds.min_tick === null || bounds.max_tick === null) return [];
 
-  const sampleEvery = bounds.observations <= maximumPoints
-    ? 1
-    : Math.max(1, Math.ceil((bounds.max_tick - bounds.min_tick) / Math.max(1, maximumPoints - 2)));
+  const sampleEvery = Math.max(1, Math.ceil(bounds.observations / Math.max(1, maximumPoints - 1)));
   const rows = cutoffTick === null
-    ? await db.prepare(`SELECT observed_at, price
-      FROM issuer_ticks
-      WHERE ticker = ? AND (tick = ? OR tick = ? OR tick % ? = 0)
+    ? await db.prepare(`WITH ranked AS (
+        SELECT tick, observed_at, price, ROW_NUMBER() OVER (ORDER BY tick) - 1 AS sample_index
+        FROM issuer_ticks WHERE ticker = ?
+      )
+      SELECT observed_at, price FROM ranked
+      WHERE sample_index % ? = 0 OR tick = ?
       ORDER BY tick`)
-      .bind(ticker, bounds.min_tick, bounds.max_tick, sampleEvery)
+      .bind(ticker, sampleEvery, bounds.max_tick)
       .all<{ observed_at: string; price: number }>()
-    : await db.prepare(`SELECT observed_at, price
-      FROM issuer_ticks
-      WHERE ticker = ? AND tick >= ? AND (tick = ? OR tick = ? OR tick % ? = 0)
+    : await db.prepare(`WITH ranked AS (
+        SELECT tick, observed_at, price, ROW_NUMBER() OVER (ORDER BY tick) - 1 AS sample_index
+        FROM issuer_ticks WHERE ticker = ? AND tick >= ?
+      )
+      SELECT observed_at, price FROM ranked
+      WHERE sample_index % ? = 0 OR tick = ?
       ORDER BY tick`)
-      .bind(ticker, cutoffTick, bounds.min_tick, bounds.max_tick, sampleEvery)
+      .bind(ticker, cutoffTick, sampleEvery, bounds.max_tick)
       .all<{ observed_at: string; price: number }>();
   const points = rows.results.map((row) => ({ time: row.observed_at, value: row.price }));
   if (points.length <= maximumPoints) return points;
