@@ -7,6 +7,7 @@ import { charterRecord, PRICE_BOOK_SUGGESTIONS, standingFor } from "./market-rec
 
 const LEDGER_KEY = "royal-exchange-merchant-ledger-v1";
 const THEME_KEY = "royal-exchange-theme-v1";
+const EASTERN_TIME_ZONE = "America/New_York";
 const FEATURED_ITEM_IDS = ["diamond", "redstone", "white_wool", "music_disc_13", "filled_map", "potion", "iron_ingot", "oak_log"];
 type ThemeMode = "light" | "dark";
 type HistoryRange = "24h" | "7d" | "30d" | "all";
@@ -30,12 +31,18 @@ function signed(value: number, suffix = "") {
   return `${value >= 0 ? "+" : ""}${number(value)}${suffix}`;
 }
 
-function utcDate(value: string) {
-  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(value));
+function easternDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", { day: "2-digit", month: "short", year: "numeric", timeZone: EASTERN_TIME_ZONE }).format(new Date(value));
 }
 
-function utcTime(value: string) {
-  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }).format(new Date(value));
+function easternTime(value: string) {
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: EASTERN_TIME_ZONE }).format(new Date(value));
+}
+
+function easternZone(value: string) {
+  return new Intl.DateTimeFormat("en-US", { timeZone: EASTERN_TIME_ZONE, timeZoneName: "short" })
+    .formatToParts(new Date(value))
+    .find((part) => part.type === "timeZoneName")?.value ?? "ET";
 }
 
 function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode }) {
@@ -140,7 +147,7 @@ function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; posi
       <canvas
         ref={canvasRef}
         className="market-chart"
-        aria-label={hovered ? `Recorded price ${number(hovered.value)} Crowns at ${utcDate(hovered.time)} ${utcTime(hovered.time)} UTC` : "Recorded price history chart. Use the pointer or arrow keys to inspect prices."}
+        aria-label={hovered ? `Recorded price ${number(hovered.value)} Crowns at ${easternDate(hovered.time)} ${easternTime(hovered.time)} ${easternZone(hovered.time)}` : "Recorded price history chart. Use the pointer or arrow keys to inspect prices."}
         tabIndex={0}
         onPointerMove={(event) => selectNearestPoint(event.clientX)}
         onPointerDown={(event) => selectNearestPoint(event.clientX)}
@@ -150,7 +157,7 @@ function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; posi
       {hovered && <>
         <span className="chart-crosshair" style={{ left: `${pointPosition}%` }} aria-hidden="true" />
         <output className="chart-tooltip" style={{ left: `${tooltipPosition}%` }}>
-          <span>{utcDate(hovered.time)} · {utcTime(hovered.time)} UTC</span>
+          <span>{easternDate(hovered.time)} · {easternTime(hovered.time)} {easternZone(hovered.time)}</span>
           <strong>{number(hovered.value)} Crowns</strong>
         </output>
       </>}
@@ -358,7 +365,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         <section className="market-strip" aria-label="Market status">
           <div><span>Market</span><strong className="status-open">Open</strong></div>
           <div><span>Data status</span><strong>Simulated · order-matched</strong></div>
-          <div><span>As of</span><strong>{utcTime(snapshot.asOf)} UTC</strong></div>
+          <div><span>As of</span><strong>{easternTime(snapshot.asOf)} {easternZone(snapshot.asOf)}</strong></div>
           <div><span>Listed issuers</span><strong>{snapshot.companies.length}</strong></div>
           <div><span>Vanilla instruments</span><strong>{number(MINECRAFT_ITEM_COUNT, 0)}</strong></div>
         </section>
@@ -401,11 +408,11 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               </div>
               <div className="history-ledger-note" aria-live="polite">
                 <strong>{historyLoading ? "Loading recorded history…" : `${chartHistory.length} recorded points`}</strong>
-                <span>Ledger began {snapshot.recordedFrom ? `${utcDate(snapshot.recordedFrom)} UTC` : "when the first observation was stored"}</span>
+                <span>Ledger began {snapshot.recordedFrom ? `${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "when the first observation was stored"}</span>
               </div>
             </div>
             <Chart points={chartHistory} positive={chartPositive} theme={theme} />
-            <div className="chart-labels"><span>{chartHistory.length > 0 ? utcDate(chartHistory[0].time) : "Recording started"}</span><span>Latest recorded</span></div>
+            <div className="chart-labels"><span>{chartHistory.length > 0 ? easternDate(chartHistory[0].time) : "Recording started"}</span><span>Latest recorded</span></div>
             <div className="focus-actions">
               <button className="action-button" onClick={() => openCharter(selected.ticker)}>Read company charter</button>
               <button className="action-button secondary" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from my ledger" : "Add to my ledger"}</button>
@@ -436,8 +443,8 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
               <div><dt>Item coverage</dt><dd>Broad vanilla families</dd></div>
               <div><dt>Price basis</dt><dd>Matched buy / sell orders</dd></div>
-              <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${utcDate(snapshot.recordedFrom)} UTC` : "Unavailable"}</dd></div>
-              <div><dt>Clearing engine</dt><dd>{snapshot.modelStartedAt ? `Since ${utcDate(snapshot.modelStartedAt)} UTC` : "Local preview"}</dd></div>
+              <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "Unavailable"}</dd></div>
+              <div><dt>Clearing engine</dt><dd>{snapshot.modelStartedAt ? `Since ${easternDate(snapshot.modelStartedAt)} ${easternZone(snapshot.modelStartedAt)}` : "Local preview"}</dd></div>
               <div><dt>Recorded ticks</dt><dd>{snapshot.recordedObservations}</dd></div>
             </dl>
           </section>
@@ -519,7 +526,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
                 <div><dt>Present standing</dt><dd>{standingFor(charterCompany)}</dd></div>
                 <div><dt>Reference price</dt><dd>{number(charterCompany.price)} Crowns</dd></div>
                 <div><dt>Session movement</dt><dd><Move value={charterCompany.changePercent} /></dd></div>
-                <div><dt>Recorded history</dt><dd>{snapshot.recordedFrom ? `From ${utcDate(snapshot.recordedFrom)} UTC` : "Awaiting ledger"}</dd></div>
+                <div><dt>Recorded history</dt><dd>{snapshot.recordedFrom ? `From ${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "Awaiting ledger"}</dd></div>
                 <div><dt>Recorded observations</dt><dd>{snapshot.recordedObservations}</dd></div>
               </dl>
               <blockquote>{record.note}</blockquote>
@@ -532,7 +539,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       <footer>
         <div><strong>Royal Exchange</strong><span>Fictional Crown market · continuously simulated · observations recorded as published</span><a className="api-link" href="/api/market">Public market data API</a><a className="api-link" href="/openapi.json">ChatGPT OpenAPI schema</a></div>
         <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
-        <div><span>As of</span><time dateTime={snapshot.asOf}>{utcTime(snapshot.asOf)} UTC</time></div>
+        <div><span>As of</span><time dateTime={snapshot.asOf}>{easternTime(snapshot.asOf)} {easternZone(snapshot.asOf)}</time></div>
       </footer>
     </main>
   );

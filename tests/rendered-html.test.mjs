@@ -48,6 +48,8 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, />30D</);
   assert.match(html, />ALL</);
   assert.match(html, /Ledger began/);
+  assert.match(html, /\b(?:EST|EDT)\b/);
+  assert.doesNotMatch(html, />[^<]*\bUTC\b[^<]*</);
   assert.match(html, /Pinned only on this device/);
   assert.match(html, /Browne of Calais Staple/);
   assert.match(html, /Whittington Mercery/);
