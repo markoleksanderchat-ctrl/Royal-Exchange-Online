@@ -1,3 +1,5 @@
+export const MARKET_MODEL_VERSION = "royal-exchange-clearing-v3" as const;
+
 export type MarketHistoryPoint = {
   time: string;
   value: number;
@@ -9,6 +11,11 @@ export type ListedCompany = {
   sector: string;
   influence: string;
   price: number;
+  bid: number;
+  ask: number;
+  spread: number;
+  fairValue: number;
+  trades: number;
   open: number;
   previousClose: number;
   change: number;
@@ -56,7 +63,8 @@ export type MarketSnapshot = {
   exchange: "Royal Exchange";
   mode: "autonomous-wall-clock";
   simulation: true;
-  modelVersion: "royal-exchange-simulation-v2-anomalies";
+  modelVersion: typeof MARKET_MODEL_VERSION;
+  modelStartedAt: string | null;
   historyMode: "recorded-ledger" | "unavailable";
   recordedFrom: string | null;
   recordedObservations: number;
@@ -77,7 +85,7 @@ export type MarketSnapshot = {
   companies: ListedCompany[];
 };
 
-type CompanyDefinition = {
+export type CompanyDefinition = {
   ticker: string;
   name: string;
   sector: string;
@@ -88,20 +96,76 @@ type CompanyDefinition = {
   phase: number;
 };
 
-const MINUTE = 60_000;
-const DAY = 24 * 60 * MINUTE;
+export type MarketParticipant = "market-maker" | "guild-fund" | "merchant-house" | "factor" | "speculator";
 
-const COMPANIES: CompanyDefinition[] = [
+export type IssuerMarketState = {
+  ticker: string;
+  lastTick: number;
+  lastPrice: number;
+  fairValue: number;
+  earningsIndex: number;
+  bookValueIndex: number;
+  debtRatio: number;
+  dividendYield: number;
+  demandIndex: number;
+  supplyIndex: number;
+  momentum: number;
+  volatility: number;
+  marketMakerInventory: number;
+  sessionDay: string;
+  sessionOpen: number;
+  sessionHigh: number;
+  sessionLow: number;
+  sessionVolume: number;
+  previousClose: number;
+  totalTrades: number;
+};
+
+export type ClearingTrade = {
+  ticker: string;
+  tick: number;
+  observedAt: string;
+  price: number;
+  bid: number;
+  ask: number;
+  quantity: number;
+  notional: number;
+  tradeCount: number;
+  buyerMix: Partial<Record<MarketParticipant, number>>;
+  sellerMix: Partial<Record<MarketParticipant, number>>;
+  fairValue: number;
+  earningsIndex: number;
+  demandIndex: number;
+  supplyIndex: number;
+};
+
+export type ClearingResult = {
+  state: IssuerMarketState;
+  trade: ClearingTrade;
+  company: ListedCompany;
+};
+
+type Order = {
+  participant: MarketParticipant;
+  side: "buy" | "sell";
+  limit: number;
+  quantity: number;
+};
+
+export const MINUTE = 60_000;
+export const MARKET_SESSION_MINUTES = 5;
+
+export const COMPANIES: CompanyDefinition[] = [
   { ticker: "STPL", name: "Browne of Calais Staple", sector: "Staple Trade", influence: "Wool, skins, lead & tin", base: 84.2, volatility: 0.052, weight: 1.2, phase: 0.3 },
   { ticker: "MRCR", name: "Whittington Mercery", sector: "Textiles", influence: "Fine cloth & imported silk", base: 126.4, volatility: 0.041, weight: 0.95, phase: 1.2 },
   { ticker: "PEPR", name: "Soper Lane Pepper House", sector: "Provisions", influence: "Spices, grain & preserved goods", base: 57.8, volatility: 0.061, weight: 1.05, phase: 2.4 },
   { ticker: "FISH", name: "Walworth & Lovekyn Fish House", sector: "Victuals", influence: "Fish, salt & river trade", base: 112.6, volatility: 0.082, weight: 1.25, phase: 3.1 },
   { ticker: "IRON", name: "Ironmonger Lane Company", sector: "Metals", influence: "Iron, copper, tools & armour", base: 43.7, volatility: 0.034, weight: 1.1, phase: 4.4 },
   { ticker: "GDSM", name: "West Chepe Goldsmiths", sector: "Bullion", influence: "Gold, emerald, diamond, lapis, amethyst & gems", base: 68.3, volatility: 0.044, weight: 0.9, phase: 5.2 },
-  { ticker: "WAXC", name: "Candlewick Street Chandlery", sector: "Lighting", influence: "Beeswax & candles", base: 76.9, volatility: 0.038, weight: 1.0, phase: 2.0 },
+  { ticker: "WAXC", name: "Candlewick Street Chandlery", sector: "Lighting", influence: "Beeswax & candles", base: 76.9, volatility: 0.038, weight: 1, phase: 2 },
   { ticker: "SKIN", name: "St Mary Axe Skinners", sector: "Peltry", influence: "Furs, hides & leather", base: 91.5, volatility: 0.072, weight: 1.1, phase: 0.8 },
   { ticker: "CORD", name: "Cordwainer Street Leatherhouse", sector: "Leatherwork", influence: "Fine shoes & worked leather", base: 104.8, volatility: 0.088, weight: 0.8, phase: 3.8 },
-  { ticker: "MSON", name: "Eastcheap Masonry Yard", sector: "Building", influence: "Stone, brick & lime", base: 98.1, volatility: 0.058, weight: 1.0, phase: 5.8 },
+  { ticker: "MSON", name: "Eastcheap Masonry Yard", sector: "Building", influence: "Stone, brick & lime", base: 98.1, volatility: 0.058, weight: 1, phase: 5.8 },
   { ticker: "CARP", name: "London Wall Carpenters", sector: "Timber", influence: "Logs, planks, saplings, leaves & bamboo", base: 72.4, volatility: 0.046, weight: 1.08, phase: 0.55 },
   { ticker: "JOIN", name: "Aldersgate Joinery", sector: "Joinery", influence: "Doors, trapdoors, stairs, slabs, fences, gates & signs", base: 64.8, volatility: 0.043, weight: 0.92, phase: 1.45 },
   { ticker: "COOP", name: "Thames Street Cooperage", sector: "Containers", influence: "Barrels, chests, bowls, buckets & storage", base: 58.7, volatility: 0.039, weight: 0.88, phase: 2.75 },
@@ -132,14 +196,49 @@ const COMPANIES: CompanyDefinition[] = [
   { ticker: "UPHL", name: "Cornhill Upholders", sector: "Furnishings", influence: "Beds, paintings, item frames, armour stands & household decoration", base: 63.6, volatility: 0.046, weight: 0.76, phase: 3.18 },
 ];
 
+const PARTICIPANTS: MarketParticipant[] = ["market-maker", "guild-fund", "merchant-house", "factor", "speculator"];
+
 function hash(value: number): number {
   const x = Math.sin(value * 12.9898 + 78.233) * 43758.5453;
   return x - Math.floor(x);
 }
 
+function tickerSeed(ticker: string) {
+  return [...ticker].reduce((seed, character) => ((seed * 31) + character.charCodeAt(0)) >>> 0, 2166136261);
+}
+
+function unit(tick: number, ticker: string, salt: number) {
+  return hash(tick * 0.000173 + tickerSeed(ticker) * 0.0137 + salt * 17.193);
+}
+
+function signedUnit(tick: number, ticker: string, salt: number) {
+  return unit(tick, ticker, salt) * 2 - 1;
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function roundPrice(value: number) {
+  return Number(Math.max(0.01, value).toFixed(2));
+}
+
+function round2(value: number) {
+  return Number(value.toFixed(2));
+}
+
 function smoothstep(value: number) {
-  const bounded = Math.max(0, Math.min(1, value));
+  const bounded = clamp(value, 0, 1);
   return bounded * bounded * (3 - 2 * bounded);
+}
+
+function approach(current: number, target: number, rate: number, elapsed: number) {
+  return current + (target - current) * (1 - Math.pow(1 - rate, elapsed));
+}
+
+export function marketTickAt(at: Date) {
+  const minute = Math.floor(at.getTime() / MINUTE);
+  return Math.floor(minute / MARKET_SESSION_MINUTES) * MARKET_SESSION_MINUTES;
 }
 
 export function anomalyImpactAt(anomaly: ActiveMarketAnomaly, time: number): number {
@@ -187,78 +286,277 @@ export const QUIET_EVENT: MarketEvent = {
   endsAt: null,
 };
 
-function companyPrice(definition: CompanyDefinition, time: number, anomalies: ActiveMarketAnomaly[]): number {
-  const minute = Math.floor(time / MINUTE);
-  const dayWave = Math.sin((time / DAY) * Math.PI * 2 + definition.phase) * definition.volatility * 0.48;
-  const weekWave = Math.sin((time / (DAY * 7)) * Math.PI * 2 + definition.phase * 0.63) * definition.volatility * 0.34;
-  const pulse = (hash(minute * 0.071 + definition.phase * 91) - 0.5) * definition.volatility * 0.22;
-  const anomalyMove = anomalies
-    .filter((anomaly) => anomaly.affectedTickers.includes(definition.ticker))
-    .reduce((sum, anomaly) => sum + anomalyImpactAt(anomaly, time) / 100, 0);
-  return Number((definition.base * Math.max(0.35, 1 + dayWave + weekWave + pulse + anomalyMove)).toFixed(2));
-}
-
-function companySnapshot(definition: CompanyDefinition, time: number, anomalies: ActiveMarketAnomaly[]): ListedCompany {
-  const price = companyPrice(definition, time, anomalies);
-  const previous = companyPrice(definition, time - DAY, anomalies);
-  const date = new Date(time);
-  const dayOpen = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  const open = companyPrice(definition, dayOpen, anomalies);
-  const points = [{ time: new Date(time).toISOString(), value: price }];
-  const values = points.map((point) => point.value);
-  const change = Number((price - previous).toFixed(2));
-  const changePercent = Number(((change / previous) * 100).toFixed(2));
-  const minute = Math.floor(time / MINUTE);
-  const eventVolume = anomalies.filter((anomaly) => anomaly.affectedTickers.includes(definition.ticker))
-    .reduce((sum, anomaly) => sum + Math.abs(anomalyImpactAt(anomaly, time)) * 0.025, 1);
-  const volume = Math.round((82_000 + hash(minute * 0.017 + definition.phase * 300) * 290_000)
-    * definition.weight * Math.min(1.85, eventVolume));
+export function initialIssuerState(definition: CompanyDefinition, lastPrice = definition.base, lastTick = 0): IssuerMarketState {
+  const day = lastTick > 0 ? new Date(lastTick * MINUTE).toISOString().slice(0, 10) : "";
   return {
     ticker: definition.ticker,
-    name: definition.name,
-    sector: definition.sector,
-    influence: definition.influence,
-    price,
-    open,
-    previousClose: previous,
-    change,
-    changePercent,
-    volume,
-    high: Math.max(...values),
-    low: Math.min(...values),
-    history: points,
+    lastTick,
+    lastPrice: roundPrice(lastPrice),
+    fairValue: roundPrice(lastPrice),
+    earningsIndex: Number((0.92 + hash(definition.phase * 13) * 0.16).toFixed(6)),
+    bookValueIndex: Number((0.94 + hash(definition.phase * 29) * 0.12).toFixed(6)),
+    debtRatio: Number((0.12 + hash(definition.phase * 47) * 0.34).toFixed(6)),
+    dividendYield: Number((0.008 + hash(definition.phase * 71) * 0.038).toFixed(6)),
+    demandIndex: 1,
+    supplyIndex: 1,
+    momentum: 0,
+    volatility: definition.volatility,
+    marketMakerInventory: 0,
+    sessionDay: day,
+    sessionOpen: roundPrice(lastPrice),
+    sessionHigh: roundPrice(lastPrice),
+    sessionLow: roundPrice(lastPrice),
+    sessionVolume: 0,
+    previousClose: roundPrice(lastPrice),
+    totalTrades: 0,
   };
 }
 
-export function getMarketSnapshot(at = new Date(), anomalies: ActiveMarketAnomaly[] = []): MarketSnapshot {
-  const time = at.getTime();
-  const tick = Math.floor(time / MINUTE);
-  const companies = COMPANIES.map((company) => companySnapshot(company, time, anomalies));
+function createOrders(
+  definition: CompanyDefinition,
+  state: IssuerMarketState,
+  tick: number,
+  fairValue: number,
+  demandIndex: number,
+  supplyIndex: number,
+  momentum: number,
+  sessionSigma: number,
+  elapsed: number,
+) {
+  const buys: Order[] = [];
+  const sells: Order[] = [];
+  const valueGap = (fairValue - state.lastPrice) / Math.max(0.01, state.lastPrice);
+  const imbalance = demandIndex - supplyIndex;
+  const signal = clamp(valueGap * 0.62 + imbalance * 0.018 + momentum * 0.22, -0.045, 0.045);
+  const inventorySkew = clamp(state.marketMakerInventory / 18_000, -1, 1) * sessionSigma * 0.45;
+  const spreadRate = clamp(0.0009 + sessionSigma * 0.55 + Math.abs(imbalance) * 0.0008, 0.0012, 0.012);
+  const center = state.lastPrice * (1 + signal * 0.42);
+
+  for (let index = 0; index < 12; index += 1) {
+    const participant = PARTICIPANTS[index % PARTICIPANTS.length];
+    const participantBias = participant === "guild-fund" ? valueGap * 0.5
+      : participant === "speculator" ? momentum * 0.5
+        : participant === "merchant-house" ? imbalance * 0.012
+          : 0;
+    const buyNoise = signedUnit(tick, definition.ticker, 100 + index) * sessionSigma * 1.35;
+    const sellNoise = signedUnit(tick, definition.ticker, 200 + index) * sessionSigma * 1.35;
+    const buyAggression = unit(tick, definition.ticker, 300 + index) * sessionSigma * 1.8;
+    const sellAggression = unit(tick, definition.ticker, 400 + index) * sessionSigma * 1.8;
+    const sizeBase = (18 + unit(tick, definition.ticker, 500 + index) * 105) * definition.weight * Math.sqrt(elapsed);
+    const quantity = Math.max(1, Math.round(sizeBase * (1 + Math.abs(signal) * 12)));
+    const makerAdjustment = participant === "market-maker" ? -inventorySkew : 0;
+    buys.push({
+      participant,
+      side: "buy",
+      limit: roundPrice(center * (1 + participantBias + buyNoise + buyAggression - spreadRate / 2 + makerAdjustment)),
+      quantity,
+    });
+    sells.push({
+      participant,
+      side: "sell",
+      limit: roundPrice(center * (1 + participantBias + sellNoise - sellAggression + spreadRate / 2 + makerAdjustment)),
+      quantity: Math.max(1, Math.round(quantity * (0.72 + unit(tick, definition.ticker, 600 + index) * 0.56))),
+    });
+  }
+  buys.sort((left, right) => right.limit - left.limit);
+  sells.sort((left, right) => left.limit - right.limit);
+  return { buys, sells, spreadRate };
+}
+
+export function runClearingSession(
+  definition: CompanyDefinition,
+  previous: IssuerMarketState,
+  tick: number,
+  anomalies: ActiveMarketAnomaly[] = [],
+): ClearingResult {
+  const observedAt = new Date(tick * MINUTE).toISOString();
+  const elapsed = clamp(Math.round((tick - previous.lastTick) / MARKET_SESSION_MINUTES) || 1, 1, 288);
+  const time = tick * MINUTE;
+  const anomalySignal = anomalies
+    .filter((anomaly) => anomaly.affectedTickers.includes(definition.ticker))
+    .reduce((sum, anomaly) => sum + anomalyImpactAt(anomaly, time) / 100, 0);
+  const macro = signedUnit(Math.floor(tick / 60), "RXC", 11);
+  const sector = signedUnit(Math.floor(tick / 30), definition.sector, 17);
+  const issuerNoise = signedUnit(tick, definition.ticker, 23);
+  const demandTarget = clamp(1 + macro * 0.022 + sector * 0.03 + issuerNoise * 0.018 + anomalySignal * 0.34, 0.68, 1.42);
+  const supplyTarget = clamp(1 - macro * 0.012 - sector * 0.018 - issuerNoise * 0.014 - anomalySignal * 0.2, 0.7, 1.38);
+  const demandIndex = approach(previous.demandIndex, demandTarget, 0.14, elapsed);
+  const supplyIndex = approach(previous.supplyIndex, supplyTarget, 0.12, elapsed);
+  const earningsTarget = clamp(0.58 + demandIndex * 0.64 - supplyIndex * 0.24 - previous.debtRatio * 0.06, 0.55, 1.5);
+  const earningsIndex = approach(previous.earningsIndex, earningsTarget, 0.012, elapsed);
+  const bookValueIndex = clamp(previous.bookValueIndex + (earningsIndex - 0.94 - previous.debtRatio * 0.04) * 0.0007 * elapsed, 0.62, 1.65);
+  const fundamentalMultiple = 0.48 * bookValueIndex
+    + 0.32 * earningsIndex
+    + 0.16 * (demandIndex / supplyIndex)
+    + 0.04 * (1 + previous.dividendYield * 5)
+    - previous.debtRatio * 0.045;
+  const fairValue = roundPrice(definition.base * clamp(fundamentalMultiple, 0.38, 2.5));
+  const volatilityTarget = definition.volatility
+    * (0.72 + Math.abs(macro) * 0.45 + Math.abs(sector) * 0.28 + Math.abs(anomalySignal) * 1.8 + Math.abs(previous.momentum) * 3.5);
+  const volatility = approach(previous.volatility, clamp(volatilityTarget, definition.volatility * 0.55, definition.volatility * 2.6), 0.18, elapsed);
+  const sessionSigma = clamp(volatility * 0.055 * Math.sqrt(elapsed), 0.0011, 0.025);
+  const momentumBefore = previous.momentum * Math.pow(0.72, elapsed);
+  const { buys, sells, spreadRate } = createOrders(
+    definition, previous, tick, fairValue, demandIndex, supplyIndex, momentumBefore, sessionSigma, elapsed,
+  );
+  const buyerMix: Partial<Record<MarketParticipant, number>> = {};
+  const sellerMix: Partial<Record<MarketParticipant, number>> = {};
+  let buyIndex = 0;
+  let sellIndex = 0;
+  let quantity = 0;
+  let notional = 0;
+  let tradeCount = 0;
+  let marketMakerInventory = previous.marketMakerInventory;
+  let lastExecution = previous.lastPrice;
+  let executionHigh = Number.NEGATIVE_INFINITY;
+  let executionLow = Number.POSITIVE_INFINITY;
+
+  while (buyIndex < buys.length && sellIndex < sells.length && buys[buyIndex].limit >= sells[sellIndex].limit) {
+    const buy = buys[buyIndex];
+    const sell = sells[sellIndex];
+    const matched = Math.min(buy.quantity, sell.quantity);
+    const execution = roundPrice(clamp((buy.limit + sell.limit) / 2, previous.lastPrice * 0.94, previous.lastPrice * 1.06));
+    quantity += matched;
+    notional += matched * execution;
+    tradeCount += 1;
+    lastExecution = execution;
+    executionHigh = Math.max(executionHigh, execution);
+    executionLow = Math.min(executionLow, execution);
+    buyerMix[buy.participant] = (buyerMix[buy.participant] ?? 0) + matched;
+    sellerMix[sell.participant] = (sellerMix[sell.participant] ?? 0) + matched;
+    if (buy.participant === "market-maker") marketMakerInventory += matched;
+    if (sell.participant === "market-maker") marketMakerInventory -= matched;
+    buy.quantity -= matched;
+    sell.quantity -= matched;
+    if (buy.quantity === 0) buyIndex += 1;
+    if (sell.quantity === 0) sellIndex += 1;
+  }
+
+  const price = tradeCount > 0 ? lastExecution : previous.lastPrice;
+  if (tradeCount === 0) {
+    executionHigh = price;
+    executionLow = price;
+  }
+  const remainingBid = buys.slice(buyIndex).find((order) => order.quantity > 0)?.limit;
+  const remainingAsk = sells.slice(sellIndex).find((order) => order.quantity > 0)?.limit;
+  let bid = roundPrice(Math.min(remainingBid ?? price * (1 - spreadRate / 2), price - 0.01));
+  let ask = roundPrice(Math.max(remainingAsk ?? price * (1 + spreadRate / 2), price + 0.01));
+  if (bid >= ask) {
+    bid = roundPrice(price * (1 - spreadRate / 2));
+    ask = roundPrice(Math.max(price + 0.01, price * (1 + spreadRate / 2)));
+  }
+  const day = observedAt.slice(0, 10);
+  const newSession = previous.sessionDay !== day;
+  const previousClose = newSession ? previous.lastPrice : previous.previousClose;
+  const sessionOpen = newSession ? price : previous.sessionOpen;
+  const sessionHigh = newSession ? executionHigh : Math.max(previous.sessionHigh, executionHigh);
+  const sessionLow = newSession ? executionLow : Math.min(previous.sessionLow, executionLow);
+  const sessionVolume = (newSession ? 0 : previous.sessionVolume) + quantity;
+  const returnRate = previous.lastPrice === 0 ? 0 : (price - previous.lastPrice) / previous.lastPrice;
+  const momentum = clamp(momentumBefore + returnRate * 0.38, -0.08, 0.08);
+  const state: IssuerMarketState = {
+    ticker: definition.ticker,
+    lastTick: tick,
+    lastPrice: price,
+    fairValue,
+    earningsIndex: Number(earningsIndex.toFixed(6)),
+    bookValueIndex: Number(bookValueIndex.toFixed(6)),
+    debtRatio: previous.debtRatio,
+    dividendYield: previous.dividendYield,
+    demandIndex: Number(demandIndex.toFixed(6)),
+    supplyIndex: Number(supplyIndex.toFixed(6)),
+    momentum: Number(momentum.toFixed(8)),
+    volatility: Number(volatility.toFixed(8)),
+    marketMakerInventory: Math.round(marketMakerInventory),
+    sessionDay: day,
+    sessionOpen,
+    sessionHigh,
+    sessionLow,
+    sessionVolume,
+    previousClose,
+    totalTrades: previous.totalTrades + tradeCount,
+  };
+  const change = round2(price - previousClose);
+  const changePercent = previousClose === 0 ? 0 : Number(((change / previousClose) * 100).toFixed(2));
+  return {
+    state,
+    trade: {
+      ticker: definition.ticker,
+      tick,
+      observedAt,
+      price,
+      bid,
+      ask,
+      quantity,
+      notional: Number(notional.toFixed(2)),
+      tradeCount,
+      buyerMix,
+      sellerMix,
+      fairValue,
+      earningsIndex: state.earningsIndex,
+      demandIndex: state.demandIndex,
+      supplyIndex: state.supplyIndex,
+    },
+    company: {
+      ticker: definition.ticker,
+      name: definition.name,
+      sector: definition.sector,
+      influence: definition.influence,
+      price,
+      bid,
+      ask,
+      spread: roundPrice(ask - bid),
+      fairValue,
+      trades: tradeCount,
+      open: sessionOpen,
+      previousClose,
+      change,
+      changePercent,
+      volume: sessionVolume,
+      high: sessionHigh,
+      low: sessionLow,
+      history: [{ time: observedAt, value: price }],
+    },
+  };
+}
+
+export function buildMarketSnapshot(
+  at: Date,
+  companies: ListedCompany[],
+  anomalies: ActiveMarketAnomaly[] = [],
+  historyMode: MarketSnapshot["historyMode"] = "unavailable",
+  recordedFrom: string | null = null,
+  recordedObservations = 0,
+  modelStartedAt: string | null = null,
+): MarketSnapshot {
+  const tick = marketTickAt(at);
+  const definitionByTicker = new Map(COMPANIES.map((company) => [company.ticker, company]));
   const weightedBase = COMPANIES.reduce((sum, company) => sum + company.base * company.weight, 0);
-  const weightedCurrent = companies.reduce((sum, company, index) => sum + company.price * COMPANIES[index].weight, 0);
-  const weightedPrevious = COMPANIES.reduce((sum, company, index) => sum + companyPrice(company, time - DAY, anomalies) * COMPANIES[index].weight, 0);
+  const weightedCurrent = companies.reduce((sum, company) => sum + company.price * (definitionByTicker.get(company.ticker)?.weight ?? 1), 0);
+  const weightedPrevious = companies.reduce((sum, company) => sum + company.previousClose * (definitionByTicker.get(company.ticker)?.weight ?? 1), 0);
   const composite = Number(((weightedCurrent / weightedBase) * 1000).toFixed(2));
   const previousComposite = (weightedPrevious / weightedBase) * 1000;
   const compositeChange = Number((composite - previousComposite).toFixed(2));
-  const compositeChangePercent = Number(((compositeChange / previousComposite) * 100).toFixed(2));
+  const compositeChangePercent = previousComposite === 0 ? 0 : Number(((compositeChange / previousComposite) * 100).toFixed(2));
   const advancing = companies.filter((company) => company.change > 0.005).length;
   const declining = companies.filter((company) => company.change < -0.005).length;
-  const events = anomalies.map((anomaly) => marketEvent(anomaly, time))
+  const events = anomalies.map((anomaly) => marketEvent(anomaly, tick * MINUTE))
     .filter((event) => Math.abs(event.impactPercent) >= 0.01)
     .sort((left, right) => Math.abs(right.impactPercent) - Math.abs(left.impactPercent));
   return {
     exchange: "Royal Exchange",
     mode: "autonomous-wall-clock",
     simulation: true,
-    modelVersion: "royal-exchange-simulation-v2-anomalies",
-    historyMode: "unavailable",
-    recordedFrom: null,
-    recordedObservations: 0,
+    modelVersion: MARKET_MODEL_VERSION,
+    modelStartedAt,
+    historyMode,
+    recordedFrom,
+    recordedObservations,
     currency: "Crown",
     status: "OPEN",
-    asOf: at.toISOString(),
+    asOf: new Date(tick * MINUTE).toISOString(),
     tick,
-    nextUpdateAt: new Date((tick + 1) * MINUTE).toISOString(),
+    nextUpdateAt: new Date((tick + MARKET_SESSION_MINUTES) * MINUTE).toISOString(),
     composite,
     compositeChange,
     compositeChangePercent,
@@ -270,4 +568,13 @@ export function getMarketSnapshot(at = new Date(), anomalies: ActiveMarketAnomal
     events,
     companies,
   };
+}
+
+export function getMarketSnapshot(at = new Date(), anomalies: ActiveMarketAnomaly[] = []): MarketSnapshot {
+  const tick = marketTickAt(at);
+  const companies = COMPANIES.map((definition) => {
+    const state = initialIssuerState(definition, definition.base, tick - MARKET_SESSION_MINUTES);
+    return runClearingSession(definition, state, tick, anomalies).company;
+  });
+  return buildMarketSnapshot(at, companies, anomalies);
 }

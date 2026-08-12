@@ -1,6 +1,6 @@
 const metaSchema = {
   type: "object",
-  required: ["apiVersion", "requestId", "asOf", "dataMode", "degraded", "source", "simulated"],
+  required: ["apiVersion", "requestId", "asOf", "dataMode", "degraded", "modelVersion", "modelStartedAt", "source", "simulated"],
   properties: {
     apiVersion: { type: "string", example: "1.0" },
     requestId: { type: "string", format: "uuid" },
@@ -8,6 +8,8 @@ const metaSchema = {
     dataAgeSeconds: { type: ["integer", "null"] },
     dataMode: { type: "string", enum: ["recorded-ledger", "fallback-simulation"] },
     degraded: { type: "boolean" },
+    modelVersion: { type: "string" },
+    modelStartedAt: { type: ["string", "null"], format: "date-time" },
     recordedFrom: { type: ["string", "null"], format: "date-time" },
     recordedObservations: { type: "integer" },
     source: { type: "string", format: "uri" },
@@ -17,16 +19,20 @@ const metaSchema = {
 
 const companySchema = {
   type: "object",
-  required: ["ticker", "name", "sector", "principalTrade", "priceCrowns", "changeCrowns", "changePercent", "volume"],
+  required: ["ticker", "name", "sector", "principalTrade", "priceCrowns", "bidCrowns", "askCrowns", "spreadCrowns", "changeCrowns", "changePercent", "volume", "matchedTrades"],
   properties: {
     ticker: { type: "string", example: "WIRE" },
     name: { type: "string" },
     sector: { type: "string" },
     principalTrade: { type: "string" },
     priceCrowns: { type: "number" },
+    bidCrowns: { type: "number" },
+    askCrowns: { type: "number" },
+    spreadCrowns: { type: "number" },
     changeCrowns: { type: "number" },
     changePercent: { type: "number" },
     volume: { type: "integer" },
+    matchedTrades: { type: "integer" },
   },
 } as const;
 

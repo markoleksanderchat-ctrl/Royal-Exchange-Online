@@ -166,7 +166,7 @@ function Move({ value }: { value: number }) {
 export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSnapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [selectedTicker, setSelectedTicker] = useState("STPL");
-  const [seconds, setSeconds] = useState(60);
+  const [seconds, setSeconds] = useState(300);
   const [query, setQuery] = useState("");
   const [wareQuery, setWareQuery] = useState("");
   const [ledgerTickers, setLedgerTickers] = useState<string[]>([]);
@@ -332,7 +332,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
           </a>
           <div className="market-clock">
             <span className="live-dot" aria-hidden="true" />
-            <span><strong>Continuous session</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded market ledger" : "Ledger unavailable"} · {seconds > 0 ? `next calculation ${seconds}s` : "calculating…"}</small></span>
+            <span><strong>Five-minute clearing</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded matched trades" : "Ledger unavailable"} · {seconds > 0 ? `next auction ${seconds}s` : "clearing…"}</small></span>
           </div>
         </div>
         <nav className="primary-nav" aria-label="Primary navigation">
@@ -357,7 +357,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
       <div className="shell" id="top">
         <section className="market-strip" aria-label="Market status">
           <div><span>Market</span><strong className="status-open">Open</strong></div>
-          <div><span>Data status</span><strong>Simulated · recorded</strong></div>
+          <div><span>Data status</span><strong>Simulated · order-matched</strong></div>
           <div><span>As of</span><strong>{utcTime(snapshot.asOf)} UTC</strong></div>
           <div><span>Listed issuers</span><strong>{snapshot.companies.length}</strong></div>
           <div><span>Vanilla instruments</span><strong>{number(MINECRAFT_ITEM_COUNT, 0)}</strong></div>
@@ -411,10 +411,12 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <button className="action-button secondary" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from my ledger" : "Add to my ledger"}</button>
             </div>
             <dl className="instrument-stats">
-              <div><dt>Recorded baseline</dt><dd>{number(selected.previousClose)}</dd></div>
+              <div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div>
               <div><dt>Session open</dt><dd>{number(selected.open)}</dd></div>
               <div><dt>High / low</dt><dd>{number(selected.high)} / {number(selected.low)}</dd></div>
-              <div><dt>Volume</dt><dd>{compact(selected.volume)}</dd></div>
+              <div><dt>Bid / ask</dt><dd>{number(selected.bid)} / {number(selected.ask)}</dd></div>
+              <div><dt>Matched trades</dt><dd>{number(selected.trades, 0)}</dd></div>
+              <div><dt>Session volume</dt><dd>{compact(selected.volume)}</dd></div>
             </dl>
           </div>
         </section>
@@ -425,7 +427,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.severity === "routine" ? "Routine conditions" : `${snapshot.event.severity} · ${snapshot.event.phase}`}</span>
             <h2>{snapshot.event.title}</h2>
             <p>{snapshot.event.description}</p>
-            <small>Affected: {snapshot.event.sector}{snapshot.event.impactPercent !== 0 ? ` · ${snapshot.event.impactPercent > 0 ? "+" : ""}${snapshot.event.impactPercent.toFixed(2)}%` : ""}</small>
+            <small>Affected: {snapshot.event.sector}{snapshot.event.impactPercent !== 0 ? ` · ${snapshot.event.impactPercent > 0 ? "+" : ""}${snapshot.event.impactPercent.toFixed(2)}% supply-demand pressure` : ""}</small>
           </section>
           <section className="rail-card">
             <div className="section-label">Market summary</div>
@@ -433,8 +435,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
               <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
               <div><dt>Item coverage</dt><dd>Broad vanilla families</dd></div>
-              <div><dt>Price basis</dt><dd>Simulated · recorded</dd></div>
+              <div><dt>Price basis</dt><dd>Matched buy / sell orders</dd></div>
               <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${utcDate(snapshot.recordedFrom)} UTC` : "Unavailable"}</dd></div>
+              <div><dt>Clearing engine</dt><dd>{snapshot.modelStartedAt ? `Since ${utcDate(snapshot.modelStartedAt)} UTC` : "Local preview"}</dd></div>
               <div><dt>Recorded ticks</dt><dd>{snapshot.recordedObservations}</dd></div>
             </dl>
           </section>

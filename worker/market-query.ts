@@ -54,6 +54,8 @@ function meta(loaded: LoadedMarket, requestId = crypto.randomUUID()) {
     dataAgeSeconds: Number.isFinite(asOfMillis) ? Math.max(0, Math.round((Date.now() - asOfMillis) / 1_000)) : null,
     dataMode: loaded.dataMode,
     degraded: loaded.degraded,
+    modelVersion: loaded.snapshot.modelVersion,
+    modelStartedAt: loaded.snapshot.modelStartedAt,
     recordedFrom: loaded.snapshot.recordedFrom,
     recordedObservations: loaded.snapshot.recordedObservations,
     source: "https://royalexchange.net/",
@@ -68,9 +70,13 @@ export function compactCompany(company: ListedCompany) {
     sector: company.sector,
     principalTrade: company.influence,
     priceCrowns: company.price,
+    bidCrowns: company.bid,
+    askCrowns: company.ask,
+    spreadCrowns: company.spread,
     changeCrowns: company.change,
     changePercent: company.changePercent,
     volume: company.volume,
+    matchedTrades: company.trades,
   };
 }
 

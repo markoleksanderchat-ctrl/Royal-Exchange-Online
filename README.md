@@ -2,7 +2,7 @@
 
 A continuously running fictional stock exchange for the Royal Exchange system.
 
-The autonomous wall-clock engine publishes a new shared market tick every minute. The responsive dashboard presents the RCX Composite, 38 listed guild issuers, live market breadth, persistent randomly scheduled anomalies, recorded `1D`, `7D`, `30D`, and all-time charts, volume, movers, and individual Minecraft item coverage.
+The persistent clearing engine runs a shared five-minute auction. Rule-based merchant houses, guild funds, factors, speculators, and market makers submit buy and sell limits; matched orders set prices and create volume. Slowly changing issuer fundamentals, supply and demand, liquidity, momentum, shared conditions, and persistent market notices shape those decisions. The responsive dashboard presents the RCX Composite, 38 listed guild issuers, bid/ask quotes, matched volume, recorded `1D`, `7D`, `30D`, and all-time charts, movers, and individual Minecraft item coverage.
 
 `GET /api/market` returns the same public snapshot used by the site. Minecraft integration is intentionally one-way: the mod may read this market later, but gameplay never changes it.
 

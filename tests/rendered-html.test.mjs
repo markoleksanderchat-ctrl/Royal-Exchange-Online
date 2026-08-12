@@ -32,7 +32,7 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /Official list/);
   assert.match(html, /Market data API/);
   assert.match(html, /Simulated market notice/);
-  assert.match(html, /Continuous session/);
+  assert.match(html, /Five-minute clearing/);
   assert.match(html, /Dark mode/);
   assert.match(html, /Daily Official List/);
   assert.match(html, /Merchant(?:’|&rsquo;)s Price Book/);
@@ -72,7 +72,8 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(market.status, "OPEN");
   assert.equal(market.mode, "autonomous-wall-clock");
   assert.equal(market.simulation, true);
-  assert.equal(market.modelVersion, "royal-exchange-simulation-v2-anomalies");
+  assert.equal(market.modelVersion, "royal-exchange-clearing-v3");
+  assert.equal(market.modelStartedAt, null);
   assert.ok(Array.isArray(market.events));
   assert.equal(typeof market.event.id, "string");
   assert.equal(typeof market.event.severity, "string");
@@ -87,6 +88,9 @@ test("publishes a complete autonomous market snapshot", async () => {
     assert.ok(company.price > 0);
     assert.ok(company.open > 0);
     assert.ok(company.previousClose > 0);
+    assert.ok(company.bid < company.ask);
+    assert.ok(company.spread > 0);
+    assert.ok(company.trades >= 0);
     assert.equal(company.history.length, 1);
   }
   assert.ok(market.companies.some((company) => company.influence.includes("Redstone")));
@@ -106,6 +110,7 @@ test("publishes a compact read-only assistant API", async () => {
   assert.equal(overview.listedIssuers, 38);
   assert.equal(overview.matches.length, 0);
   assert.equal(overview.meta.apiVersion, "1.0");
+  assert.equal(overview.meta.modelVersion, "royal-exchange-clearing-v3");
   assert.equal(overview.meta.degraded, true);
   assert.ok(JSON.stringify(overview).length < 5_000);
 
