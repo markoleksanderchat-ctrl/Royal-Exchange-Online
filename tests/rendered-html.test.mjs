@@ -61,6 +61,15 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|Your site is taking shape|signin-with-chatgpt/i);
 });
 
+test("renders a branded recovery page for unknown routes", async () => {
+  const app = await worker();
+  const response = await app.fetch(new Request("https://exchange.example/not-a-real-page", { headers: { accept: "text/html" } }), environment, context);
+  assert.equal(response.status, 404);
+  const html = await response.text();
+  assert.match(html, /That market page does not exist/);
+  assert.match(html, /Return to Royal Exchange/);
+});
+
 test("publishes a complete autonomous market snapshot", async () => {
   const app = await worker();
   const response = await app.fetch(new Request("https://exchange.example/api/market"), environment, context);
@@ -207,7 +216,7 @@ test("removes starter assets and packages production metadata", async () => {
   assert.match(styles, /\.primary-nav/);
   assert.match(styles, /\.market-strip \{ min-width: 0; grid-column: 1 \/ -1; display: grid;/);
   assert.match(styles, /\.market-row \{[\s\S]*?grid-template-columns:/);
-  assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.primary-nav \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)[\s\S]*?\.index-line \{ display: grid;/);
+  assert.match(styles, /@media \(max-width: 820px\)[\s\S]*?\.primary-nav \{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)[\s\S]*?\.index-line \{ display: grid;/);
   assert.match(styles, /@media \(max-width: 1050px\)[\s\S]*?\.market-rail \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(styles, /@media \(max-width: 500px\)[\s\S]*?\.focus-heading \{ display: grid;/);
   assert.match(styles, /:root\[data-theme="dark"\]/);

@@ -31,6 +31,16 @@ function signed(value: number, suffix = "") {
   return `${value >= 0 ? "+" : ""}${number(value)}${suffix}`;
 }
 
+function normalizedSearch(value: string) {
+  return value.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function searchVariants(value: string) {
+  const normalized = normalizedSearch(value);
+  const singular = normalized.endsWith("s") ? normalized.slice(0, -1) : normalized;
+  return [...new Set([normalized, singular].filter(Boolean))];
+}
+
 function easternDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { day: "2-digit", month: "short", year: "numeric", timeZone: EASTERN_TIME_ZONE }).format(new Date(value));
 }
@@ -189,6 +199,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     points: MarketHistoryPoint[];
     changeCrowns: number | null;
   } | null>(null);
+  const charterSheetRef = useRef<HTMLElement>(null);
+  const charterCloseRef = useRef<HTMLButtonElement>(null);
+  const charterTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -249,11 +262,38 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
   useEffect(() => {
     if (!charterTicker) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCharterTicker(null);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusTimer = window.setTimeout(() => charterCloseRef.current?.focus(), 0);
+    const handleDialogKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCharterTicker(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(charterSheetRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? []).filter((element) => element.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", handleDialogKey);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", handleDialogKey);
+      document.body.style.overflow = previousOverflow;
+      const trigger = charterTriggerRef.current;
+      window.setTimeout(() => trigger?.focus(), 0);
+    };
   }, [charterTicker]);
 
   const selected = snapshot.companies.find((company) => company.ticker === selectedTicker) ?? snapshot.companies[0];
@@ -296,15 +336,49 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return snapshot.companies;
-    return snapshot.companies.filter((company) => `${company.ticker} ${company.name} ${company.sector} ${company.influence}`.toLowerCase().includes(needle));
+    return snapshot.companies
+      .map((company, index) => {
+        const ticker = company.ticker.toLowerCase();
+        const name = company.name.toLowerCase();
+        const sector = company.sector.toLowerCase();
+        const searchable = `${ticker} ${name} ${sector} ${company.influence.toLowerCase()}`;
+        const score = ticker === needle ? 0
+          : name === needle ? 1
+          : ticker.startsWith(needle) ? 2
+          : name.startsWith(needle) ? 3
+          : sector.startsWith(needle) ? 4
+          : 5;
+        return { company, index, score, matches: searchable.includes(needle) };
+      })
+      .filter((entry) => entry.matches)
+      .sort((a, b) => a.score - b.score || a.index - b.index)
+      .map((entry) => entry.company);
   }, [query, snapshot.companies]);
   const leaders = [...snapshot.companies].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
   const priceBookResults = useMemo(() => {
-    const needle = wareQuery.trim().toLowerCase();
-    const matches = (needle ? MINECRAFT_ITEMS.filter((item) => {
-      const company = snapshot.companies.find((entry) => entry.ticker === item.ticker);
-      return `${item.id} ${item.name} ${company?.ticker ?? ""} ${company?.name ?? ""} ${company?.sector ?? ""}`.toLowerCase().includes(needle);
-    }) : FEATURED_ITEM_IDS.map((id) => MINECRAFT_ITEMS.find((item) => item.id === id)).filter((item): item is (typeof MINECRAFT_ITEMS)[number] => Boolean(item)));
+    const variants = searchVariants(wareQuery);
+    const matches = (variants.length > 0 ? MINECRAFT_ITEMS
+      .map((item, index) => {
+        const company = snapshot.companies.find((entry) => entry.ticker === item.ticker);
+        const itemId = normalizedSearch(item.id);
+        const itemName = normalizedSearch(item.name);
+        const companyIdentity = normalizedSearch(`${company?.ticker ?? ""} ${company?.name ?? ""} ${company?.sector ?? ""}`);
+        const companyTrade = normalizedSearch(company?.influence ?? "");
+        const matchesAny = (text: string) => variants.some((needle) => text.includes(needle));
+        const equalsAny = (text: string) => variants.some((needle) => text === needle);
+        const startsWithAny = (text: string) => variants.some((needle) => text.startsWith(needle));
+        const score = equalsAny(itemId) || equalsAny(itemName) ? 0
+          : startsWithAny(itemId) || startsWithAny(itemName) ? 1
+          : matchesAny(`${itemId} ${itemName}`) ? 2
+          : matchesAny(companyIdentity) ? 3
+          : matchesAny(companyTrade) ? 4
+          : Number.POSITIVE_INFINITY;
+        return { item, index, score };
+      })
+      .filter((entry) => Number.isFinite(entry.score))
+      .sort((a, b) => a.score - b.score || a.index - b.index)
+      .map((entry) => entry.item)
+      : FEATURED_ITEM_IDS.map((id) => MINECRAFT_ITEMS.find((item) => item.id === id)).filter((item): item is (typeof MINECRAFT_ITEMS)[number] => Boolean(item)));
     return {
       total: matches.length,
       entries: matches.slice(0, 12).map((item) => ({ item, company: snapshot.companies.find((company) => company.ticker === item.ticker) })).filter((entry): entry is { item: (typeof MINECRAFT_ITEMS)[number]; company: ListedCompany } => Boolean(entry.company)),
@@ -318,6 +392,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   };
 
   const openCharter = (ticker: string) => {
+    charterTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedTicker(ticker);
     setCharterTicker(ticker);
   };
@@ -507,6 +582,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
                 <span className="influence-cell" data-label="Influences">{company.influence}</span>
               </button>
             ))}
+            {filtered.length === 0 && <p className="empty-note listings-empty" role="status">No listed company matches “{query.trim()}”. Try a ticker, guild, sector, or trade.</p>}
           </div>
         </section>
       </div>
@@ -516,8 +592,8 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         const isPinned = ledgerTickers.includes(charterCompany.ticker);
         return (
           <div className="charter-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setCharterTicker(null); }}>
-            <section className="charter-sheet" role="dialog" aria-modal="true" aria-labelledby="charter-title">
-              <button className="charter-close" onClick={() => setCharterTicker(null)} aria-label="Close company charter">Close</button>
+            <section ref={charterSheetRef} className="charter-sheet" role="dialog" aria-modal="true" aria-labelledby="charter-title">
+              <button ref={charterCloseRef} className="charter-close" onClick={() => setCharterTicker(null)} aria-label="Close company charter">Close</button>
               <div className="charter-kicker">Fictional market charter · {record.register}</div>
               <div className="charter-heading"><span className="charter-seal" aria-hidden="true">{charterCompany.ticker.slice(0, 2)}</span><div><span>{charterCompany.ticker} · {charterCompany.sector}</span><h2 id="charter-title">{charterCompany.name}</h2><p>{record.seat}</p></div></div>
               <p className="charter-preamble">Entered in the simulated Royal Exchange register as the recognized market account for {charterCompany.influence.toLowerCase()}.</p>
