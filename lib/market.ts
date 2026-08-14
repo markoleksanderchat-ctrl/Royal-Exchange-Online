@@ -154,6 +154,48 @@ type Order = {
 
 export const MINUTE = 60_000;
 export const MARKET_SESSION_MINUTES = 5;
+const MARKET_TIME_ZONE = "America/New_York";
+const MARKET_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: MARKET_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const MARKET_OFFSET_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: MARKET_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function dateParts(formatter: Intl.DateTimeFormat, value: Date) {
+  return Object.fromEntries(formatter.formatToParts(value)
+    .filter((part) => part.type !== "literal")
+    .map((part) => [part.type, Number(part.value)]));
+}
+
+export function marketSessionDayAt(value: Date | number) {
+  const parts = dateParts(MARKET_DAY_FORMATTER, value instanceof Date ? value : new Date(value));
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function easternOffsetAt(epochMillis: number) {
+  const parts = dateParts(MARKET_OFFSET_FORMATTER, new Date(epochMillis));
+  const representedAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return representedAsUtc - Math.floor(epochMillis / 1_000) * 1_000;
+}
+
+export function marketSessionStartTick(value: Date) {
+  const [year, month, day] = marketSessionDayAt(value).split("-").map(Number);
+  const localMidnightAsUtc = Date.UTC(year, month - 1, day);
+  const firstEstimate = localMidnightAsUtc - easternOffsetAt(localMidnightAsUtc);
+  const corrected = localMidnightAsUtc - easternOffsetAt(firstEstimate);
+  return Math.floor(corrected / MINUTE);
+}
 
 export const COMPANIES: CompanyDefinition[] = [
   { ticker: "STPL", name: "Browne of Calais Staple", sector: "Staple Trade", influence: "Wool, skins, lead & tin", base: 84.2, volatility: 0.052, weight: 1.2, phase: 0.3 },
@@ -287,7 +329,7 @@ export const QUIET_EVENT: MarketEvent = {
 };
 
 export function initialIssuerState(definition: CompanyDefinition, lastPrice = definition.base, lastTick = 0): IssuerMarketState {
-  const day = lastTick > 0 ? new Date(lastTick * MINUTE).toISOString().slice(0, 10) : "";
+  const day = lastTick > 0 ? marketSessionDayAt(lastTick * MINUTE) : "";
   return {
     ticker: definition.ticker,
     lastTick,
@@ -445,7 +487,7 @@ export function runClearingSession(
     bid = roundPrice(price * (1 - spreadRate / 2));
     ask = roundPrice(Math.max(price + 0.01, price * (1 + spreadRate / 2)));
   }
-  const day = observedAt.slice(0, 10);
+  const day = marketSessionDayAt(tick * MINUTE);
   const newSession = previous.sessionDay !== day;
   const previousClose = newSession ? previous.lastPrice : previous.previousClose;
   const sessionOpen = newSession ? price : previous.sessionOpen;

@@ -131,7 +131,9 @@ a { color: inherit; }
 .focus-price { flex: 0 0 auto; display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 2px 8px; text-align: right; }
 .focus-price strong { color: var(--heading); font: 500 30px var(--font-serif); font-variant-numeric: tabular-nums; }
 .focus-price small { color: var(--ink-soft); font-size: 10px; text-transform: uppercase; }
-.focus-price .move { grid-column: 1 / -1; font: 700 12px var(--font-mono), monospace; }
+.focus-change { grid-column: 1 / -1; display: inline-flex; justify-content: flex-end; gap: 6px; align-items: baseline; }
+.focus-change .move { font: 700 12px var(--font-mono), monospace; }
+.focus-change > span { color: var(--ink-soft); font: 9px var(--font-mono), monospace; letter-spacing: .06em; text-transform: uppercase; }
 .history-controls { min-height: 62px; padding: 11px 20px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); background: var(--surface-muted); }
 .history-range { display: inline-flex; border: 1px solid var(--line-dark); }
 .history-range button { min-width: 48px; min-height: 34px; padding: 6px 10px; border: 0; border-right: 1px solid var(--line); background: var(--row); color: var(--ink-soft); cursor: pointer; font: 800 10px var(--font-mono), monospace; letter-spacing: .06em; }
@@ -366,6 +368,7 @@ footer > div:last-child { justify-content: flex-end; }
   .breadth span:last-child { border-bottom: 0; }
   .focus-heading { display: grid; }
   .focus-price { justify-self: start; text-align: left; }
+  .focus-change { justify-content: flex-start; }
   .market-chart-wrap { margin-inline: 12px; }
   .market-chart { height: 180px; }
   .focus-actions .action-button { width: 100%; }

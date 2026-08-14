@@ -5,6 +5,7 @@ import {
   initialIssuerState,
   MARKET_MODEL_VERSION,
   MARKET_SESSION_MINUTES,
+  marketSessionStartTick,
   marketTickAt,
   MINUTE,
   QUIET_EVENT,
@@ -266,7 +267,7 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
 export async function getRecordedMarketSnapshot(db: D1Database, at = new Date()): Promise<MarketSnapshot> {
   const currentTick = await recordMarketTick(db, at);
   const cutoffTick = currentTick - DAY_MINUTES;
-  const dayStartTick = Math.floor(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()) / MINUTE);
+  const dayStartTick = marketSessionStartTick(at);
 
   const [currentMarket, currentIssuers, currentTrades, history, sessionRanges, ledger, modelMeta, previousMarket] = await Promise.all([
     db.prepare("SELECT tick, observed_at, composite, total_volume, model_version, event_json FROM market_ticks WHERE tick = ?")

@@ -31,6 +31,14 @@ function signed(value: number, suffix = "") {
   return `${value >= 0 ? "+" : ""}${number(value)}${suffix}`;
 }
 
+function secondsUntil(value: string) {
+  return Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 1_000));
+}
+
+function snapshotIntervalSeconds(snapshot: MarketSnapshot) {
+  return Math.max(0, Math.ceil((new Date(snapshot.nextUpdateAt).getTime() - new Date(snapshot.asOf).getTime()) / 1_000));
+}
+
 function normalizedSearch(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -183,7 +191,7 @@ function Move({ value }: { value: number }) {
 export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSnapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [selectedTicker, setSelectedTicker] = useState("STPL");
-  const [seconds, setSeconds] = useState(300);
+  const [seconds, setSeconds] = useState(() => snapshotIntervalSeconds(initialSnapshot));
   const [query, setQuery] = useState("");
   const [wareQuery, setWareQuery] = useState("");
   const [ledgerTickers, setLedgerTickers] = useState<string[]>([]);
@@ -191,13 +199,14 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   const [charterTicker, setCharterTicker] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themeReady, setThemeReady] = useState(false);
-  const [historyRange, setHistoryRange] = useState<HistoryRange>("7d");
+  const [historyRange, setHistoryRange] = useState<HistoryRange>("24h");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyView, setHistoryView] = useState<{
     ticker: string;
     range: HistoryRange;
     points: MarketHistoryPoint[];
     changeCrowns: number | null;
+    changePercent: number | null;
   } | null>(null);
   const charterSheetRef = useRef<HTMLElement>(null);
   const charterCloseRef = useRef<HTMLButtonElement>(null);
@@ -223,6 +232,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   }, [theme, themeReady]);
 
   useEffect(() => {
+    const syncTimer = window.setTimeout(() => setSeconds(secondsUntil(snapshot.nextUpdateAt)), 0);
     const refresh = async () => {
       try {
         const response = await fetch("/api/market", { cache: "no-store" });
@@ -234,9 +244,10 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     const refreshTimer = window.setInterval(refresh, 30_000);
     void refresh();
     const countdownTimer = window.setInterval(() => {
-      setSeconds(Math.max(0, Math.ceil((new Date(snapshot.nextUpdateAt).getTime() - Date.now()) / 1000)));
+      setSeconds(secondsUntil(snapshot.nextUpdateAt));
     }, 1_000);
     return () => {
+      window.clearTimeout(syncTimer);
       window.clearInterval(refreshTimer);
       window.clearInterval(countdownTimer);
     };
@@ -310,7 +321,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         const payload = await response.json() as {
           issuer: {
             history: MarketHistoryPoint[];
-            performance: { changeCrowns: number | null };
+            performance: { changeCrowns: number | null; changePercent: number | null };
           };
         };
         setHistoryView({
@@ -318,6 +329,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
           range: historyRange,
           points: payload.issuer.history,
           changeCrowns: payload.issuer.performance.changeCrowns,
+          changePercent: payload.issuer.performance.changePercent,
         });
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -332,7 +344,14 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   }, [historyRange, selected.ticker]);
   const activeHistory = historyView?.ticker === selected.ticker && historyView.range === historyRange ? historyView : null;
   const chartHistory = activeHistory?.points ?? selected.history;
-  const chartPositive = (activeHistory?.changeCrowns ?? selected.change) >= 0;
+  const chartFirst = chartHistory.at(0)?.value ?? null;
+  const chartLast = chartHistory.at(-1)?.value ?? null;
+  const derivedChartChange = chartFirst === null || chartLast === null ? null : Number((chartLast - chartFirst).toFixed(2));
+  const derivedChartChangePercent = chartFirst ? Number((((chartLast ?? chartFirst) - chartFirst) / chartFirst * 100).toFixed(2)) : null;
+  const chartChangeCrowns = activeHistory?.changeCrowns ?? derivedChartChange;
+  const chartChangePercent = activeHistory?.changePercent ?? derivedChartChangePercent;
+  const chartPositive = (chartChangeCrowns ?? 0) >= 0;
+  const historyLabel = HISTORY_RANGES.find((range) => range.value === historyRange)?.label ?? historyRange;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return snapshot.companies;
@@ -386,6 +405,9 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   }, [snapshot.companies, wareQuery]);
   const ledgerCompanies = ledgerTickers.map((ticker) => snapshot.companies.find((company) => company.ticker === ticker)).filter((company): company is ListedCompany => Boolean(company));
   const charterCompany = charterTicker ? snapshot.companies.find((company) => company.ticker === charterTicker) ?? null : null;
+  const eventCompanies = snapshot.event.affectedTickers
+    .map((ticker) => snapshot.companies.find((company) => company.ticker === ticker))
+    .filter((company): company is ListedCompany => Boolean(company));
 
   const toggleLedger = (ticker: string) => {
     setLedgerTickers((current) => current.includes(ticker) ? current.filter((value) => value !== ticker) : [...current, ticker]);
@@ -467,7 +489,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
           <div className="focus-card">
             <div className="focus-heading">
               <div><span className="ticker-badge">{selected.ticker}</span><h2>{selected.name}</h2><p>{selected.sector} · {selected.influence}</p></div>
-              <div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><Move value={selected.changePercent} /></div>
+              <div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><div className="focus-change"><Move value={selected.changePercent} /><span>session</span></div></div>
             </div>
             <div className="history-controls">
               <div className="history-range" role="group" aria-label="Recorded history range">
@@ -482,12 +504,14 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
                 ))}
               </div>
               <div className="history-ledger-note" aria-live="polite">
-                <strong>{historyLoading ? "Loading recorded history…" : `${chartHistory.length} recorded points`}</strong>
+                <strong>{historyLoading ? `Loading ${historyLabel} history…` : chartChangeCrowns === null || chartChangePercent === null
+                  ? `${historyLabel} performance unavailable · ${chartHistory.length} plotted points`
+                  : `${historyLabel} ${signed(chartChangeCrowns)} (${signed(chartChangePercent, "%")}) · ${chartHistory.length} plotted points`}</strong>
                 <span>Ledger began {snapshot.recordedFrom ? `${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "when the first observation was stored"}</span>
               </div>
             </div>
             <Chart points={chartHistory} positive={chartPositive} theme={theme} />
-            <div className="chart-labels"><span>{chartHistory.length > 0 ? easternDate(chartHistory[0].time) : "Recording started"}</span><span>Latest recorded</span></div>
+            <div className="chart-labels"><span>{chartHistory.length > 0 ? easternDate(chartHistory[0].time) : "Recording started"}</span><span>{chartHistory.length > 0 ? `Latest ${easternTime(chartHistory.at(-1)!.time)} ${easternZone(chartHistory.at(-1)!.time)}` : "Awaiting observation"}</span></div>
             <div className="focus-actions">
               <button className="action-button" onClick={() => openCharter(selected.ticker)}>Read company charter</button>
               <button className="action-button secondary" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from my ledger" : "Add to my ledger"}</button>
@@ -497,8 +521,8 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
               <div><dt>Session open</dt><dd>{number(selected.open)}</dd></div>
               <div><dt>High / low</dt><dd>{number(selected.high)} / {number(selected.low)}</dd></div>
               <div><dt>Bid / ask</dt><dd>{number(selected.bid)} / {number(selected.ask)}</dd></div>
-              <div><dt>Matched trades</dt><dd>{number(selected.trades, 0)}</dd></div>
-              <div><dt>Session volume</dt><dd>{compact(selected.volume)}</dd></div>
+              <div><dt>Last clearing trades</dt><dd>{number(selected.trades, 0)}</dd></div>
+              <div><dt>Session volume</dt><dd title={`${number(selected.volume, 0)} exact`}>{compact(selected.volume)}</dd></div>
             </dl>
           </div>
         </section>
@@ -509,18 +533,21 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
             <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.severity === "routine" ? "Routine conditions" : `${snapshot.event.severity} · ${snapshot.event.phase}`}</span>
             <h2>{snapshot.event.title}</h2>
             <p>{snapshot.event.description}</p>
-            <small>Affected: {snapshot.event.sector}{snapshot.event.impactPercent !== 0 ? ` · ${snapshot.event.impactPercent > 0 ? "+" : ""}${snapshot.event.impactPercent.toFixed(2)}% supply-demand pressure` : ""}</small>
+            <small>Affected: {snapshot.event.sector}
+              {eventCompanies.length > 0 ? ` · ${eventCompanies.map((company) => `${company.ticker} ${signed(company.changePercent, "%")}`).join(", ")} session` : ""}
+              {snapshot.event.impactPercent !== 0 ? ` · ${snapshot.event.impactPercent > 0 ? "+" : ""}${snapshot.event.impactPercent.toFixed(2)}% model pressure` : ""}
+            </small>
           </section>
           <section className="rail-card">
             <div className="section-label">Market summary</div>
             <dl className="rail-stats">
-              <div><dt>Total volume</dt><dd>{compact(snapshot.totalVolume)}</dd></div>
+              <div><dt>Total volume</dt><dd title={`${number(snapshot.totalVolume, 0)} exact`}>{compact(snapshot.totalVolume)}</dd></div>
               <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
               <div><dt>Item coverage</dt><dd>Broad vanilla families</dd></div>
               <div><dt>Price basis</dt><dd>Matched buy / sell orders</dd></div>
               <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "Unavailable"}</dd></div>
               <div><dt>Clearing engine</dt><dd>{snapshot.modelStartedAt ? `Since ${easternDate(snapshot.modelStartedAt)} ${easternZone(snapshot.modelStartedAt)}` : "Local preview"}</dd></div>
-              <div><dt>Recorded ticks</dt><dd>{snapshot.recordedObservations}</dd></div>
+              <div><dt>Recorded ticks</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div>
             </dl>
           </section>
           <section className="rail-card movers-card">

@@ -5,12 +5,38 @@ import {
   COMPANIES,
   initialIssuerState,
   MARKET_MODEL_VERSION,
+  marketSessionDayAt,
+  marketSessionStartTick,
   marketTickAt,
   runClearingSession,
   getMarketSnapshot,
 } from "../lib/market.ts";
 
 const WIRE = COMPANIES.find((company) => company.ticker === "WIRE");
+
+test("market sessions follow Eastern midnight in standard and daylight time", () => {
+  assert.equal(marketSessionDayAt(new Date("2026-08-12T03:59:00Z")), "2026-08-11");
+  assert.equal(marketSessionDayAt(new Date("2026-08-12T04:00:00Z")), "2026-08-12");
+  assert.equal(marketSessionDayAt(new Date("2026-01-12T04:59:00Z")), "2026-01-11");
+  assert.equal(marketSessionDayAt(new Date("2026-01-12T05:00:00Z")), "2026-01-12");
+  assert.equal(new Date(marketSessionStartTick(new Date("2026-08-12T12:00:00Z")) * 60_000).toISOString(), "2026-08-12T04:00:00.000Z");
+  assert.equal(new Date(marketSessionStartTick(new Date("2026-01-12T12:00:00Z")) * 60_000).toISOString(), "2026-01-12T05:00:00.000Z");
+});
+
+test("session totals continue across UTC midnight and reset at Eastern midnight", () => {
+  const beforeUtcMidnight = marketTickAt(new Date("2026-08-12T23:55:00Z"));
+  const beforeEasternMidnight = marketTickAt(new Date("2026-08-13T03:55:00Z"));
+  const atEasternMidnight = marketTickAt(new Date("2026-08-13T04:00:00Z"));
+  const initial = initialIssuerState(WIRE, WIRE.base, beforeUtcMidnight - 5);
+  const first = runClearingSession(WIRE, initial, beforeUtcMidnight);
+  const afterUtcMidnight = runClearingSession(WIRE, first.state, beforeUtcMidnight + 5);
+  const beforeEastern = runClearingSession(WIRE, afterUtcMidnight.state, beforeEasternMidnight);
+  const afterEastern = runClearingSession(WIRE, beforeEastern.state, atEasternMidnight);
+
+  assert.equal(afterUtcMidnight.company.volume, first.company.volume + afterUtcMidnight.trade.quantity);
+  assert.equal(afterEastern.company.volume, afterEastern.trade.quantity);
+  assert.equal(afterEastern.company.previousClose, beforeEastern.company.price);
+});
 
 test("matched orders, not a display formula, create price and volume", () => {
   const tick = marketTickAt(new Date("2026-08-12T12:00:00Z"));
