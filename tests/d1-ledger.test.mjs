@@ -111,7 +111,7 @@ test('restart migration removes history, state, notices and snapshots, then star
   await ensureMarketSchema(db);
   await getRecordedMarketSnapshot(db, start);
   await getRecordedMarketSnapshot(db, at(5));
-  db.sqlite.exec(readFileSync(new URL('../drizzle/0003_restart_exchange.sql', import.meta.url), 'utf8'));
+  db.sqlite.exec(readFileSync(new URL('./fixtures/restart-exchange.sql', import.meta.url), 'utf8'));
   for (const name of ['market_ticks', 'issuer_ticks', 'market_trade_ticks', 'issuer_market_state', 'market_anomalies', 'market_anomaly_state', 'market_snapshot']) {
     assert.equal(db.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get().n, 0);
   }
@@ -140,4 +140,18 @@ test('incremental snapshots retain exactly the trailing day across session rollo
   const baseline = JSON.parse(db.sqlite.prepare('SELECT event_json FROM market_ticks LIMIT 1').get().event_json);
   assert.ok(baseline.event);
   db.sqlite.close();
+});
+
+test('performance migration preserves existing records and supports a fresh installation', async () => {
+  const fresh = new SqliteD1();
+  for (const file of ['0000_mute_taskmaster.sql', '0001_market_anomalies.sql', '0002_real_market_engine.sql', '0003_bounded_snapshots.sql']) {
+    fresh.sqlite.exec(readFileSync(new URL('../drizzle/' + file, import.meta.url), 'utf8'));
+  }
+  const before = await getRecordedMarketSnapshot(fresh, start);
+  for (const file of ['0001_market_anomalies.sql', '0002_real_market_engine.sql', '0003_bounded_snapshots.sql']) {
+    fresh.sqlite.exec(readFileSync(new URL('../drizzle/' + file, import.meta.url), 'utf8'));
+  }
+  assert.deepEqual(await getRecordedMarketSnapshot(fresh, start), before);
+  assert.equal(fresh.sqlite.prepare('SELECT COUNT(*) AS n FROM issuer_ticks').get().n, 38);
+  fresh.sqlite.close();
 });

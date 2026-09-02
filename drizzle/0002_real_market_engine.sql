@@ -1,4 +1,4 @@
-CREATE TABLE `issuer_market_state` (
+CREATE TABLE IF NOT EXISTS `issuer_market_state` (
 	`ticker` text PRIMARY KEY NOT NULL,
 	`last_tick` integer NOT NULL,
 	`last_price` real NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE `issuer_market_state` (
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `market_trade_ticks` (
+CREATE TABLE IF NOT EXISTS `market_trade_ticks` (
 	`tick` integer NOT NULL,
 	`ticker` text NOT NULL,
 	`observed_at` text NOT NULL,
@@ -47,4 +47,5 @@ CREATE TABLE `market_trade_ticks` (
 	PRIMARY KEY(`tick`, `ticker`)
 );
 --> statement-breakpoint
-CREATE INDEX `market_trade_ticks_ticker_tick_idx` ON `market_trade_ticks` (`ticker`,`tick`);
+CREATE INDEX IF NOT EXISTS `market_trade_ticks_ticker_tick_idx` ON `market_trade_ticks` (`ticker`,`tick`);
+
