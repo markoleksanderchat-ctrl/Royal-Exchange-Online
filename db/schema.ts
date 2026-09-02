@@ -23,8 +23,36 @@ export const issuerTicks = sqliteTable("issuer_ticks", {
 }, (table) => [
   primaryKey({ columns: [table.tick, table.ticker] }),
   index("issuer_ticks_ticker_tick_idx").on(table.ticker, table.tick),
-  index("issuer_ticks_observed_at_idx").on(table.observedAt),
 ]);
+
+export const marketSnapshot = sqliteTable("market_snapshot", {
+  id: integer("id").primaryKey(),
+  tick: integer("tick").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+});
+
+export const marketAnomalyState = sqliteTable("market_anomaly_state", {
+  id: integer("id").primaryKey(),
+  nextAnomalyAt: integer("next_anomaly_at").notNull(),
+  generation: integer("generation").notNull().default(0),
+});
+
+export const marketAnomalies = sqliteTable("market_anomalies", {
+  id: text("id").primaryKey(),
+  templateKey: text("template_key").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  tone: text("tone").notNull(),
+  severity: text("severity").notNull(),
+  sector: text("sector").notNull(),
+  affectedTickers: text("affected_tickers").notNull(),
+  peakImpactPercent: real("peak_impact_percent").notNull(),
+  shape: text("shape").notNull(),
+  startedAt: integer("started_at").notNull(),
+  peaksAt: integer("peaks_at").notNull(),
+  endsAt: integer("ends_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("market_anomalies_ends_at_idx").on(table.endsAt)]);
 
 export const issuerMarketState = sqliteTable("issuer_market_state", {
   ticker: text("ticker").primaryKey(),

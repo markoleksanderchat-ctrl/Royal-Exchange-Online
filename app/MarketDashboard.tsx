@@ -232,26 +232,45 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   }, [theme, themeReady]);
 
   useEffect(() => {
-    const syncTimer = window.setTimeout(() => setSeconds(secondsUntil(snapshot.nextUpdateAt)), 0);
+    let nextUpdateAt = initialSnapshot.nextUpdateAt;
+    let refreshTimer: number | undefined;
+    let pending = false;
+    let stopped = false;
+    const controller = new AbortController();
     const refresh = async () => {
+      if (stopped || pending || document.hidden) return;
+      pending = true;
       try {
-        const response = await fetch("/api/market", { cache: "no-store" });
-        if (response.ok) setSnapshot(await response.json() as MarketSnapshot);
+        const response = await fetch("/api/market", { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const latest = await response.json() as MarketSnapshot;
+          nextUpdateAt = latest.nextUpdateAt;
+          if (!stopped) setSnapshot(latest);
+        }
       } catch {
         // The last valid snapshot remains visible through transient network loss.
+      } finally {
+        pending = false;
+        if (!stopped) {
+          window.clearTimeout(refreshTimer);
+          refreshTimer = window.setTimeout(refresh, Math.max(30_000, Math.min(300_000, Date.parse(nextUpdateAt) - Date.now() + 1_000)));
+        }
       }
     };
-    const refreshTimer = window.setInterval(refresh, 30_000);
     void refresh();
     const countdownTimer = window.setInterval(() => {
-      setSeconds(secondsUntil(snapshot.nextUpdateAt));
+      setSeconds(secondsUntil(nextUpdateAt));
     }, 1_000);
+    const onVisibility = () => { if (!document.hidden) void refresh(); };
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.clearTimeout(syncTimer);
-      window.clearInterval(refreshTimer);
+      stopped = true;
+      controller.abort();
+      window.clearTimeout(refreshTimer);
       window.clearInterval(countdownTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [snapshot.nextUpdateAt]);
+  }, [initialSnapshot.nextUpdateAt]);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -341,7 +360,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     };
     void loadHistory();
     return () => controller.abort();
-  }, [historyRange, selected.ticker]);
+  }, [historyRange, selected.ticker, snapshot.tick]);
   const activeHistory = historyView?.ticker === selected.ticker && historyView.range === historyRange ? historyView : null;
   const chartHistory = activeHistory?.points ?? selected.history;
   const chartFirst = chartHistory.at(0)?.value ?? null;

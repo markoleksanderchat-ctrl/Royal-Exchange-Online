@@ -138,6 +138,14 @@ async function historyFor(
   period: HistoryPeriod,
   historyPoints: number,
 ) {
+  const minutes = PERIOD_MINUTES[period];
+  if (loaded.dataMode === "recorded-ledger" && minutes !== null && minutes <= 1_440) {
+    const cutoff = Date.parse(loaded.snapshot.asOf) - minutes * 60_000;
+    const points = company.history.filter((point) => Date.parse(point.time) >= cutoff);
+    if (points.length <= historyPoints) return points;
+    if (historyPoints === 1) return points.slice(-1);
+    return Array.from({ length: historyPoints }, (_, index) => points[Math.round(index * (points.length - 1) / (historyPoints - 1))]);
+  }
   if (env.DB && loaded.dataMode === "recorded-ledger") {
     try {
       const points = await getRecordedIssuerHistory(env.DB, company.ticker, PERIOD_MINUTES[period], historyPoints);

@@ -81,7 +81,7 @@ export const anomalySchemaStatements = [
     ends_at INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
-  "CREATE INDEX IF NOT EXISTS market_anomalies_window_idx ON market_anomalies (started_at, ends_at)",
+  "CREATE INDEX IF NOT EXISTS market_anomalies_ends_at_idx ON market_anomalies (ends_at)",
 ] as const;
 
 function secureRandom() {
@@ -154,7 +154,6 @@ function fromRow(row: AnomalyRow): ActiveMarketAnomaly {
 }
 
 export async function resolveMarketAnomalies(db: D1Database, at = Date.now()): Promise<ActiveMarketAnomaly[]> {
-  await db.batch(anomalySchemaStatements.map((statement) => db.prepare(statement)));
   await db.prepare("INSERT OR IGNORE INTO market_anomaly_state (id, next_anomaly_at, generation) VALUES (1, ?, 0)")
     .bind(at + nextDelay(secureRandom)).run();
   const schedule = await db.prepare("SELECT next_anomaly_at, generation FROM market_anomaly_state WHERE id = 1")

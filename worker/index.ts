@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { getMarketSnapshot } from "../lib/market";
-import { getRecordedMarketSnapshot, recordMarketTick } from "../lib/market-ledger";
+import { getRecordedMarketSnapshot } from "../lib/market-ledger";
 import { handleAssistantApi } from "./assistant-api";
 import { handleAssistantV1 } from "./assistant-v1";
 import { handleRoyalExchangeMcp } from "./mcp";
@@ -71,7 +71,7 @@ const worker = {
     return handler.fetch(request, env, ctx);
   },
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(recordMarketTick(env.DB, new Date(controller.scheduledTime)));
+    ctx.waitUntil(getRecordedMarketSnapshot(env.DB, new Date(controller.scheduledTime)));
   },
 };
 

@@ -1,4 +1,4 @@
-import { anomalySchemaStatements, resolveMarketAnomalies } from "./anomalies";
+import { anomalySchemaStatements, resolveMarketAnomalies } from "./anomalies.ts";
 import {
   buildMarketSnapshot,
   COMPANIES,
@@ -15,7 +15,7 @@ import {
   type MarketEvent,
   type MarketHistoryPoint,
   type MarketSnapshot,
-} from "./market";
+} from "./market.ts";
 
 const DAY_MINUTES = 24 * 60;
 const HISTORY_SAMPLE_MINUTES = 5;
@@ -42,7 +42,11 @@ export const marketSchemaStatements = [
     PRIMARY KEY (tick, ticker)
   )`,
   "CREATE INDEX IF NOT EXISTS issuer_ticks_ticker_tick_idx ON issuer_ticks (ticker, tick)",
-  "CREATE INDEX IF NOT EXISTS issuer_ticks_observed_at_idx ON issuer_ticks (observed_at)",
+  `CREATE TABLE IF NOT EXISTS market_snapshot (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    tick INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS issuer_market_state (
     ticker TEXT PRIMARY KEY,
     last_tick INTEGER NOT NULL,
@@ -142,11 +146,10 @@ type TradeRow = {
 };
 
 type SummaryRow = { ticker: string; high: number; low: number };
-type PriceRow = { ticker: string; price: number };
 type MarketRow = { tick: number; observed_at: string; composite: number; total_volume: number; model_version: string; event_json: string };
 type LedgerMeta = { recorded_from: string | null; observations: number };
 type ModelMeta = { model_started_at: string | null };
-type HistoryBounds = { min_tick: number | null; max_tick: number | null; observations: number };
+type SnapshotRow = { tick: number; snapshot_json: string };
 
 function stateFromRow(row: StateRow): IssuerMarketState {
   return {
@@ -178,20 +181,19 @@ export async function ensureMarketSchema(db: D1Database) {
 }
 
 export async function recordMarketTick(db: D1Database, at = new Date()) {
-  await ensureMarketSchema(db);
   const tick = marketTickAt(at);
   const existing = await db.prepare("SELECT tick FROM market_ticks WHERE tick = ?").bind(tick).first<{ tick: number }>();
   if (existing) return existing.tick;
 
-  const [anomalies, states, latestPrices] = await Promise.all([
+  const [anomalies, states] = await Promise.all([
     resolveMarketAnomalies(db, tick * MINUTE),
     db.prepare("SELECT * FROM issuer_market_state ORDER BY ticker").all<StateRow>(),
-    db.prepare(`SELECT value.ticker, value.price FROM issuer_ticks value
-      INNER JOIN (SELECT ticker, MAX(tick) AS latest_tick FROM issuer_ticks GROUP BY ticker) latest
-      ON value.ticker = latest.ticker AND value.tick = latest.latest_tick`).all<PriceRow>(),
   ]);
   const stateByTicker = new Map(states.results.map((row) => [row.ticker, stateFromRow(row)]));
-  const latestByTicker = new Map(latestPrices.results.map((row) => [row.ticker, row.price]));
+  const missing = COMPANIES.filter((company) => !stateByTicker.has(company.ticker));
+  const seeds = missing.length === 0 ? [] : await db.batch<{ price: number }>(missing.map((company) =>
+    db.prepare("SELECT price FROM issuer_ticks WHERE ticker = ? ORDER BY tick DESC LIMIT 1").bind(company.ticker)));
+  const latestByTicker = new Map(missing.map((company, index) => [company.ticker, seeds[index].results[0]?.price]));
   const newestStateTick = Math.max(0, ...states.results.map((row) => row.last_tick));
   if (newestStateTick > tick) return newestStateTick;
 
@@ -202,7 +204,7 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
   });
   const snapshot = buildMarketSnapshot(new Date(tick * MINUTE), results.map((result) => result.company), anomalies);
   const statements: D1PreparedStatement[] = [
-    db.prepare(`INSERT OR IGNORE INTO market_ticks
+    db.prepare(`INSERT INTO market_ticks
       (tick, observed_at, composite, total_volume, model_version, event_json)
       VALUES (?, ?, ?, ?, ?, ?)`)
       .bind(tick, snapshot.asOf, snapshot.composite, snapshot.totalVolume, MARKET_MODEL_VERSION,
@@ -260,16 +262,27 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
           state.sessionVolume, state.previousClose, state.totalTrades),
     );
   }
-  await db.batch(statements);
+  try {
+    // A competing recorder must roll back its entire batch, not overwrite the
+    // winning tick's state. The primary key is the cross-isolate arbiter.
+    await db.batch(statements);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("UNIQUE constraint failed: market_ticks.tick")) throw error;
+    const winner = await db.prepare("SELECT tick FROM market_ticks WHERE tick = ?").bind(tick).first();
+    if (!winner) throw error;
+  }
   return tick;
 }
 
 export async function getRecordedMarketSnapshot(db: D1Database, at = new Date()): Promise<MarketSnapshot> {
+  const cachedRow = await db.prepare("SELECT tick, snapshot_json FROM market_snapshot WHERE id = 1").first<SnapshotRow>();
+  const cached = cachedRow ? JSON.parse(cachedRow.snapshot_json) as MarketSnapshot : null;
+  if (cached && cached.tick >= marketTickAt(at)) return cached;
   const currentTick = await recordMarketTick(db, at);
   const cutoffTick = currentTick - DAY_MINUTES;
   const dayStartTick = marketSessionStartTick(at);
 
-  const [currentMarket, currentIssuers, currentTrades, history, sessionRanges, ledger, modelMeta, previousMarket] = await Promise.all([
+  const [currentMarket, currentIssuers, currentTrades, history, ledger, modelMeta, previousMarket] = await Promise.all([
     db.prepare("SELECT tick, observed_at, composite, total_volume, model_version, event_json FROM market_ticks WHERE tick = ?")
       .bind(currentTick).first<MarketRow>(),
     db.prepare(`SELECT tick, ticker, name, sector, influence, observed_at, price, volume
@@ -277,15 +290,16 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     db.prepare(`SELECT ticker, bid, ask, trade_count, fair_value, session_open, session_high,
       session_low, session_volume, previous_close FROM market_trade_ticks WHERE tick = ? ORDER BY ticker`)
       .bind(currentTick).all<TradeRow>(),
-    db.prepare(`SELECT tick, ticker, name, sector, influence, observed_at, price, volume
+    cached ? Promise.resolve({ results: [] as IssuerRow[] }) : db.prepare(`SELECT tick, ticker, name, sector, influence, observed_at, price, volume
       FROM issuer_ticks
       WHERE tick >= ? AND (tick % ? = 0 OR tick = ? OR tick =
         (SELECT MIN(tick) FROM market_ticks WHERE tick >= ?))
-      ORDER BY ticker, tick`).bind(cutoffTick, HISTORY_SAMPLE_MINUTES, currentTick, cutoffTick).all<IssuerRow>(),
-    db.prepare(`SELECT ticker, MAX(price) AS high, MIN(price) AS low
-      FROM issuer_ticks WHERE tick >= ? GROUP BY ticker`).bind(dayStartTick).all<SummaryRow>(),
-    db.prepare("SELECT MIN(observed_at) AS recorded_from, COUNT(*) AS observations FROM market_ticks").first<LedgerMeta>(),
-    db.prepare("SELECT MIN(observed_at) AS model_started_at FROM market_ticks WHERE model_version = ?")
+      ORDER BY tick, ticker`).bind(cutoffTick, HISTORY_SAMPLE_MINUTES, currentTick, cutoffTick).all<IssuerRow>(),
+    cached ? db.prepare("SELECT COUNT(*) AS observations FROM market_ticks WHERE tick > ? AND tick <= ?")
+      .bind(cached.tick, currentTick).first<LedgerMeta>().then((row) => ({
+        recorded_from: cached.recordedFrom, observations: cached.recordedObservations + (row?.observations ?? 0),
+      })) : db.prepare("SELECT MIN(observed_at) AS recorded_from, COUNT(*) AS observations FROM market_ticks").first<LedgerMeta>(),
+    cached && cached.modelVersion === MARKET_MODEL_VERSION ? Promise.resolve({ model_started_at: cached.modelStartedAt }) : db.prepare("SELECT MIN(observed_at) AS model_started_at FROM market_ticks WHERE model_version = ?")
       .bind(MARKET_MODEL_VERSION).first<ModelMeta>(),
     db.prepare("SELECT composite FROM market_ticks WHERE tick < ? ORDER BY tick DESC LIMIT 1")
       .bind(dayStartTick).first<{ composite: number }>(),
@@ -294,12 +308,27 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
   if (!currentMarket || currentIssuers.results.length === 0) throw new Error("The recorded market tick is unavailable.");
   const tradeByTicker = new Map(currentTrades.results.map((row) => [row.ticker, row]));
   const historyByTicker = new Map<string, MarketHistoryPoint[]>();
+  if (cached) {
+    for (const company of cached.companies) {
+      historyByTicker.set(company.ticker, company.history.filter((point) => Date.parse(point.time) >= cutoffTick * MINUTE));
+    }
+    // Read only observations since the previous snapshot, including recovery
+    // after a recorder completed but snapshot publication was interrupted.
+    const additions = await db.prepare(`SELECT tick, ticker, observed_at, price FROM issuer_ticks
+      WHERE tick > ? AND tick <= ? ORDER BY tick, ticker`)
+      .bind(Math.max(cached.tick, cutoffTick - 1), currentTick).all<IssuerRow>();
+    history.results.push(...additions.results);
+  }
   for (const row of history.results) {
     const points = historyByTicker.get(row.ticker) ?? [];
     points.push({ time: row.observed_at, value: row.price });
     historyByTicker.set(row.ticker, points);
   }
-  const rangeByTicker = new Map(sessionRanges.results.map((row) => [row.ticker, row]));
+  const rangeByTicker = new Map<string, SummaryRow>();
+  for (const [ticker, points] of historyByTicker) {
+    const prices = points.filter((point) => Date.parse(point.time) >= dayStartTick * MINUTE).map((point) => point.value);
+    if (prices.length) rangeByTicker.set(ticker, { ticker, high: Math.max(...prices), low: Math.min(...prices) });
+  }
   const companies: ListedCompany[] = currentIssuers.results.map((current) => {
     const quote = tradeByTicker.get(current.ticker);
     const previousClose = quote?.previous_close ?? current.price;
@@ -344,7 +373,7 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
   const event: MarketEvent = storedEnvelope ? storedEnvelope.event ?? QUIET_EVENT : storedEvent as MarketEvent;
   const events: MarketEvent[] = storedEnvelope?.events ?? (event.id === "none" ? [] : [event]);
 
-  return {
+  const snapshot: MarketSnapshot = {
     exchange: "Royal Exchange",
     mode: "autonomous-wall-clock",
     simulation: true,
@@ -369,6 +398,10 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     events,
     companies,
   };
+  await db.prepare(`INSERT INTO market_snapshot (id, tick, snapshot_json) VALUES (1, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET tick = excluded.tick, snapshot_json = excluded.snapshot_json
+    WHERE excluded.tick > market_snapshot.tick`).bind(currentTick, JSON.stringify(snapshot)).run();
+  return snapshot;
 }
 
 export async function getRecordedIssuerHistory(
@@ -377,39 +410,29 @@ export async function getRecordedIssuerHistory(
   periodMinutes: number | null,
   maximumPoints = 120,
 ): Promise<MarketHistoryPoint[]> {
-  const cutoffTick = periodMinutes === null ? null : Math.floor(Date.now() / MINUTE) - periodMinutes;
-  const bounds = cutoffTick === null
-    ? await db.prepare(`SELECT MIN(tick) AS min_tick, MAX(tick) AS max_tick, COUNT(*) AS observations
-      FROM issuer_ticks WHERE ticker = ?`).bind(ticker).first<HistoryBounds>()
-    : await db.prepare(`SELECT MIN(tick) AS min_tick, MAX(tick) AS max_tick, COUNT(*) AS observations
-      FROM issuer_ticks WHERE ticker = ? AND tick >= ?`).bind(ticker, cutoffTick).first<HistoryBounds>();
-  if (!bounds?.observations || bounds.min_tick === null || bounds.max_tick === null) return [];
+  const cutoffTick = periodMinutes === null ? 0 : Math.floor(Date.now() / MINUTE) - periodMinutes;
+  const limit = Math.max(1, Math.min(120, Math.floor(maximumPoints)));
+  const bounds = await db.batch<{ tick: number }>([
+    db.prepare("SELECT tick FROM issuer_ticks WHERE ticker = ? AND tick >= ? ORDER BY tick ASC LIMIT 1").bind(ticker, cutoffTick),
+    db.prepare("SELECT tick FROM issuer_ticks WHERE ticker = ? AND tick >= ? ORDER BY tick DESC LIMIT 1").bind(ticker, cutoffTick),
+  ]);
+  const first = bounds[0].results[0]?.tick;
+  const last = bounds[1].results[0]?.tick;
+  if (first === undefined || last === undefined) return [];
 
-  const sampleEvery = Math.max(1, Math.ceil(bounds.observations / Math.max(1, maximumPoints - 1)));
-  const rows = cutoffTick === null
-    ? await db.prepare(`WITH ranked AS (
-        SELECT tick, observed_at, price, ROW_NUMBER() OVER (ORDER BY tick) - 1 AS sample_index
-        FROM issuer_ticks WHERE ticker = ?
-      )
-      SELECT observed_at, price FROM ranked
-      WHERE sample_index % ? = 0 OR tick = ?
-      ORDER BY tick`)
-      .bind(ticker, sampleEvery, bounds.max_tick)
-      .all<{ observed_at: string; price: number }>()
-    : await db.prepare(`WITH ranked AS (
-        SELECT tick, observed_at, price, ROW_NUMBER() OVER (ORDER BY tick) - 1 AS sample_index
-        FROM issuer_ticks WHERE ticker = ? AND tick >= ?
-      )
-      SELECT observed_at, price FROM ranked
-      WHERE sample_index % ? = 0 OR tick = ?
-      ORDER BY tick`)
-      .bind(ticker, cutoffTick, sampleEvery, bounds.max_tick)
-      .all<{ observed_at: string; price: number }>();
-  const points = rows.results.map((row) => ({ time: row.observed_at, value: row.price }));
-  if (points.length <= maximumPoints) return points;
-  const stride = Math.ceil(points.length / maximumPoints);
-  const sampled = points.filter((_point, index) => index % stride === 0);
-  const latest = points.at(-1);
-  if (latest && sampled.at(-1)?.time !== latest.time) sampled.push(latest);
-  return sampled.slice(-maximumPoints);
+  // At most 120 indexed seeks, irrespective of retained history size. Each
+  // target picks a real observation; gaps never manufacture market prices.
+  const rows = await db.prepare(`WITH RECURSIVE samples(n) AS (
+      SELECT 0 UNION ALL SELECT n + 1 FROM samples WHERE n + 1 < ?1
+    ), targets AS (
+      SELECT CASE WHEN ?1 = 1 THEN ?3 ELSE ?2 + CAST((?3 - ?2) * n / (?1 - 1) AS INTEGER) END AS target
+      FROM samples
+    )
+    SELECT observed_at, price FROM issuer_ticks
+    WHERE ticker = ?4 AND tick IN (
+      SELECT (SELECT tick FROM issuer_ticks
+        WHERE ticker = ?4 AND tick >= target AND tick <= ?3 ORDER BY tick ASC LIMIT 1)
+      FROM targets
+    ) ORDER BY tick`).bind(limit, first, last, ticker).all<{ observed_at: string; price: number }>();
+  return rows.results.map((row) => ({ time: row.observed_at, value: row.price }));
 }
