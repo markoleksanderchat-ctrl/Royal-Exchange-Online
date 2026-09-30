@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { ITEM_IMAGES } from "./item-images";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ListedCompany, MarketHistoryPoint, MarketSnapshot } from "../lib/market";
 import { MINECRAFT_ITEM_COUNT, MINECRAFT_ITEMS, MINECRAFT_VERSION } from "./minecraft-items";
@@ -9,8 +11,11 @@ const LEDGER_KEY = "royal-exchange-merchant-ledger-v1";
 const THEME_KEY = "royal-exchange-theme-v1";
 const EASTERN_TIME_ZONE = "America/New_York";
 const FEATURED_ITEM_IDS = ["diamond", "redstone", "white_wool", "music_disc_13", "filled_map", "potion", "iron_ingot", "oak_log"];
+export type ExchangeView = "overview" | "markets" | "price-book" | "ledger" | "data" | "issuer";
 type ThemeMode = "light" | "dark";
 type HistoryRange = "24h" | "7d" | "30d" | "all";
+type ListingSort = "name" | "last" | "change" | "volume";
+type MoversMode = "gainers" | "decliners" | "active";
 
 const HISTORY_RANGES: Array<{ value: HistoryRange; label: string }> = [
   { value: "24h", label: "1D" },
@@ -63,7 +68,7 @@ function easternZone(value: string) {
     .find((part) => part.type === "timeZoneName")?.value ?? "ET";
 }
 
-function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode }) {
+function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode; unit?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -86,23 +91,28 @@ function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; posi
       const high = Math.max(...values);
       const range = Math.max(0.01, high - low);
       const left = 2;
-      const right = bounds.width - 2;
+      const right = bounds.width - 62;
       const top = 14;
       const bottom = bounds.height - 18;
 
       const styles = window.getComputedStyle(canvas);
       context.strokeStyle = styles.getPropertyValue("--chart-grid").trim() || "rgba(92, 62, 31, .18)";
       context.lineWidth = 1;
+      context.font = "12px " + styles.fontFamily;
+      context.fillStyle = styles.getPropertyValue("--chart-label").trim();
       for (let line = 0; line < 4; line += 1) {
         const y = top + ((bottom - top) * line) / 3;
         context.beginPath();
         context.moveTo(left, y);
         context.lineTo(right, y);
         context.stroke();
+        context.fillText(number(high - range * line / 3), right + 9, y + 4);
       }
 
+      const startTime = Date.parse(points[0].time);
+      const timeSpan = Math.max(1, Date.parse(points.at(-1)!.time) - startTime);
       const coordinates = points.map((point, index) => ({
-        x: left + ((right - left) * index) / (points.length - 1),
+        x: left + (right - left) * (timeSpan === 1 ? index / (points.length - 1) : (Date.parse(point.time) - startTime) / timeSpan),
         y: bottom - ((point.value - low) / range) * (bottom - top),
       }));
       const color = styles.getPropertyValue(positive ? "--chart-up" : "--chart-down").trim() || (positive ? "#3c7755" : "#9e493d");
@@ -139,14 +149,19 @@ function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; posi
   }, [points, positive, theme]);
 
   if (points.length < 2) {
-    return <div className="market-chart chart-recording" role="img" aria-label="Price history recording has started">Recording first observations</div>;
+    return <div className="market-chart chart-recording" role="status">
+      <strong>{points.length ? "First observation recorded" : "History not available"}</strong>
+      <span>{points.length ? "More history will appear after the next clearing." : "No recorded prices are available for this range."}</span>
+    </div>;
   }
   const selectNearestPoint = (clientX: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const bounds = canvas.getBoundingClientRect();
-    const progress = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width)));
-    setHoverIndex(Math.round(progress * (points.length - 1)));
+    const progress = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width - 62)));
+    const targetTime = Date.parse(points[0].time) + progress * (Date.parse(points.at(-1)!.time) - Date.parse(points[0].time));
+    const nearest = points.reduce((best, point, index) => Math.abs(Date.parse(point.time) - targetTime) < Math.abs(Date.parse(points[best].time) - targetTime) ? index : best, 0);
+    setHoverIndex(nearest);
   };
   const moveSelection = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -156,16 +171,15 @@ function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; posi
     else setHoverIndex((current) => Math.max(0, Math.min(points.length - 1,
       (current ?? points.length - 1) + (event.key === "ArrowLeft" ? -1 : 1))));
   };
-  const hovered = hoverIndex === null ? null : points[hoverIndex];
-  const pointPosition = hoverIndex === null ? 0 : (hoverIndex / (points.length - 1)) * 100;
-  const tooltipPosition = Math.max(8, Math.min(92, pointPosition));
+  const hovered = hoverIndex === null ? null : points[Math.min(hoverIndex, points.length - 1)];
+  const pointPosition = !hovered ? 0 : ((Date.parse(hovered.time) - Date.parse(points[0].time)) / Math.max(1, Date.parse(points.at(-1)!.time) - Date.parse(points[0].time))) * 100;
 
   return (
     <div className="market-chart-wrap" onPointerLeave={() => setHoverIndex(null)}>
       <canvas
         ref={canvasRef}
         className="market-chart"
-        aria-label={hovered ? `Recorded price ${number(hovered.value)} Crowns at ${easternDate(hovered.time)} ${easternTime(hovered.time)} ${easternZone(hovered.time)}` : "Recorded price history chart. Use the pointer or arrow keys to inspect prices."}
+        aria-label={hovered ? `Recorded value ${number(hovered.value)} ${unit} at ${easternDate(hovered.time)} ${easternTime(hovered.time)} ${easternZone(hovered.time)}` : "Recorded history chart in " + unit + ". Use the pointer or arrow keys to inspect observations."}
         tabIndex={0}
         onPointerMove={(event) => selectNearestPoint(event.clientX)}
         onPointerDown={(event) => selectNearestPoint(event.clientX)}
@@ -173,10 +187,10 @@ function Chart({ points, positive, theme }: { points: MarketHistoryPoint[]; posi
         onBlur={() => setHoverIndex(null)}
       />
       {hovered && <>
-        <span className="chart-crosshair" style={{ left: `${pointPosition}%` }} aria-hidden="true" />
-        <output className="chart-tooltip" style={{ left: `${tooltipPosition}%` }}>
+        <span className="chart-crosshair" style={{ left: `calc((100% - 62px) * ${pointPosition / 100})` }} aria-hidden="true" />
+        <output className="chart-tooltip" style={{ left: `clamp(120px, calc((100% - 62px) * ${pointPosition / 100}), calc(100% - 120px))` }}>
           <span>{easternDate(hovered.time)} · {easternTime(hovered.time)} {easternZone(hovered.time)}</span>
-          <strong>{number(hovered.value)} Crowns</strong>
+          <strong>{number(hovered.value)} {unit}</strong>
         </output>
       </>}
     </div>
@@ -188,12 +202,22 @@ function Move({ value }: { value: number }) {
   return <span className={`move ${direction}`}>{signed(value, "%")}</span>;
 }
 
-export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSnapshot }) {
+export function MarketDashboard({ initialSnapshot, view = "overview", initialTicker = "STPL" }: { initialSnapshot: MarketSnapshot; view?: ExchangeView; initialTicker?: string }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [selectedTicker, setSelectedTicker] = useState("STPL");
+  const [selectedTicker, setSelectedTicker] = useState(initialTicker);
   const [seconds, setSeconds] = useState(() => snapshotIntervalSeconds(initialSnapshot));
   const [query, setQuery] = useState("");
+  const [sector, setSector] = useState("all");
+  const [listingSort, setListingSort] = useState<ListingSort>("name");
+  const [sortDescending, setSortDescending] = useState(false);
+  const [moversMode, setMoversMode] = useState<MoversMode>("gainers");
   const [wareQuery, setWareQuery] = useState("");
+  const [wareSector, setWareSector] = useState("all");
+  const [warePage, setWarePage] = useState(0);
+  const [compositeRange, setCompositeRange] = useState<HistoryRange>("24h");
+  const [compositeHistory, setCompositeHistory] = useState<{ range: HistoryRange; points: MarketHistoryPoint[] } | null>(null);
+  const [compositeLoading, setCompositeLoading] = useState(false);
+  const [dataDelayed, setDataDelayed] = useState(false);
   const [ledgerTickers, setLedgerTickers] = useState<string[]>([]);
   const [ledgerReady, setLedgerReady] = useState(false);
   const [charterTicker, setCharterTicker] = useState<string | null>(null);
@@ -214,7 +238,8 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem(THEME_KEY);
+      let saved: string | null = null;
+      try { saved = window.localStorage.getItem(THEME_KEY); } catch { /* Private browsing can disable preferences. */ }
       const initialTheme: ThemeMode = saved === "dark" || saved === "light"
         ? saved
         : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -228,7 +253,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
   useEffect(() => {
     if (!themeReady) return;
     document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem(THEME_KEY, theme);
+    try { window.localStorage.setItem(THEME_KEY, theme); } catch { /* The theme still works for this visit. */ }
   }, [theme, themeReady]);
 
   useEffect(() => {
@@ -260,6 +285,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     void refresh();
     const countdownTimer = window.setInterval(() => {
       setSeconds(secondsUntil(nextUpdateAt));
+      setDataDelayed(Date.now() > Date.parse(nextUpdateAt) + 60_000);
     }, 1_000);
     const onVisibility = () => { if (!document.hidden) void refresh(); };
     document.addEventListener("visibilitychange", onVisibility);
@@ -287,7 +313,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
   useEffect(() => {
     if (!ledgerReady) return;
-    window.localStorage.setItem(LEDGER_KEY, JSON.stringify(ledgerTickers));
+    try { window.localStorage.setItem(LEDGER_KEY, JSON.stringify(ledgerTickers)); } catch { /* Keep the watchlist usable for this visit. */ }
   }, [ledgerReady, ledgerTickers]);
 
   useEffect(() => {
@@ -328,6 +354,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
 
   const selected = snapshot.companies.find((company) => company.ticker === selectedTicker) ?? snapshot.companies[0];
   useEffect(() => {
+    if (view !== "issuer") return;
     const controller = new AbortController();
     const loadHistory = async () => {
       setHistoryLoading(true);
@@ -360,21 +387,22 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     };
     void loadHistory();
     return () => controller.abort();
-  }, [historyRange, selected.ticker, snapshot.tick]);
+  }, [historyRange, selected.ticker, snapshot.tick, view]);
   const activeHistory = historyView?.ticker === selected.ticker && historyView.range === historyRange ? historyView : null;
-  const chartHistory = activeHistory?.points ?? selected.history;
+  const chartHistory = activeHistory?.points ?? (historyRange === "24h" ? selected.history : []);
   const chartFirst = chartHistory.at(0)?.value ?? null;
   const chartLast = chartHistory.at(-1)?.value ?? null;
-  const derivedChartChange = chartFirst === null || chartLast === null ? null : Number((chartLast - chartFirst).toFixed(2));
-  const derivedChartChangePercent = chartFirst ? Number((((chartLast ?? chartFirst) - chartFirst) / chartFirst * 100).toFixed(2)) : null;
-  const chartChangeCrowns = activeHistory?.changeCrowns ?? derivedChartChange;
-  const chartChangePercent = activeHistory?.changePercent ?? derivedChartChangePercent;
+  const derivedChartChange = chartHistory.length < 2 || chartFirst === null || chartLast === null ? null : Number((chartLast - chartFirst).toFixed(2));
+  const derivedChartChangePercent = chartHistory.length < 2 || !chartFirst ? null : Number((((chartLast ?? chartFirst) - chartFirst) / chartFirst * 100).toFixed(2));
+  const chartChangeCrowns = chartHistory.length < 2 ? null : activeHistory?.changeCrowns ?? derivedChartChange;
+  const chartChangePercent = chartHistory.length < 2 ? null : activeHistory?.changePercent ?? derivedChartChangePercent;
   const chartPositive = (chartChangeCrowns ?? 0) >= 0;
   const historyLabel = HISTORY_RANGES.find((range) => range.value === historyRange)?.label ?? historyRange;
+  const sectors = useMemo(() => [...new Set(snapshot.companies.map((company) => company.sector))].sort(), [snapshot.companies]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return snapshot.companies;
-    return snapshot.companies
+    const matches = snapshot.companies.filter((company) => sector === "all" || company.sector === sector);
+    const ranked = !needle ? matches.map((company, index) => ({ company, index, score: 0 })) : matches
       .map((company, index) => {
         const ticker = company.ticker.toLowerCase();
         const name = company.name.toLowerCase();
@@ -388,45 +416,54 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
           : 5;
         return { company, index, score, matches: searchable.includes(needle) };
       })
-      .filter((entry) => entry.matches)
-      .sort((a, b) => a.score - b.score || a.index - b.index)
-      .map((entry) => entry.company);
-  }, [query, snapshot.companies]);
-  const leaders = [...snapshot.companies].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+      .filter((entry) => entry.matches);
+    return ranked.sort((a, b) => {
+      const relevance = a.score - b.score;
+      if (needle && listingSort === "name" && relevance) return relevance;
+      const comparison = listingSort === "name" ? a.company.name.localeCompare(b.company.name)
+        : listingSort === "last" ? a.company.price - b.company.price
+        : listingSort === "change" ? a.company.changePercent - b.company.changePercent
+        : a.company.volume - b.company.volume;
+      return (sortDescending ? -comparison : comparison) || a.index - b.index;
+    }).map((entry) => entry.company);
+  }, [query, sector, listingSort, sortDescending, snapshot.companies]);
+  const movers = useMemo(() => snapshot.companies.filter((company) => moversMode === "gainers" ? company.changePercent > 0 : moversMode === "decliners" ? company.changePercent < 0 : company.volume > 0).sort((a, b) => moversMode === "gainers"
+    ? b.changePercent - a.changePercent
+    : moversMode === "decliners" ? a.changePercent - b.changePercent
+    : b.volume - a.volume).slice(0, 5), [snapshot.companies, moversMode]);
+  const chooseListingSort = (key: ListingSort) => {
+    if (listingSort === key) setSortDescending((current) => !current);
+    else {
+      setListingSort(key);
+      setSortDescending(key !== "name");
+    }
+  };
   const priceBookResults = useMemo(() => {
     const variants = searchVariants(wareQuery);
-    const matches = (variants.length > 0 ? MINECRAFT_ITEMS
-      .map((item, index) => {
-        const company = snapshot.companies.find((entry) => entry.ticker === item.ticker);
-        const itemId = normalizedSearch(item.id);
-        const itemName = normalizedSearch(item.name);
-        const companyIdentity = normalizedSearch(`${company?.ticker ?? ""} ${company?.name ?? ""} ${company?.sector ?? ""}`);
-        const companyTrade = normalizedSearch(company?.influence ?? "");
-        const matchesAny = (text: string) => variants.some((needle) => text.includes(needle));
-        const equalsAny = (text: string) => variants.some((needle) => text === needle);
-        const startsWithAny = (text: string) => variants.some((needle) => text.startsWith(needle));
-        const score = equalsAny(itemId) || equalsAny(itemName) ? 0
-          : startsWithAny(itemId) || startsWithAny(itemName) ? 1
-          : matchesAny(`${itemId} ${itemName}`) ? 2
-          : matchesAny(companyIdentity) ? 3
-          : matchesAny(companyTrade) ? 4
-          : Number.POSITIVE_INFINITY;
-        return { item, index, score };
-      })
-      .filter((entry) => Number.isFinite(entry.score))
-      .sort((a, b) => a.score - b.score || a.index - b.index)
-      .map((entry) => entry.item)
-      : FEATURED_ITEM_IDS.map((id) => MINECRAFT_ITEMS.find((item) => item.id === id)).filter((item): item is (typeof MINECRAFT_ITEMS)[number] => Boolean(item)));
-    return {
-      total: matches.length,
-      entries: matches.slice(0, 12).map((item) => ({ item, company: snapshot.companies.find((company) => company.ticker === item.ticker) })).filter((entry): entry is { item: (typeof MINECRAFT_ITEMS)[number]; company: ListedCompany } => Boolean(entry.company)),
-    };
-  }, [snapshot.companies, wareQuery]);
+    const companies = new Map(snapshot.companies.map((company) => [company.ticker, company]));
+    const matches = MINECRAFT_ITEMS.map((item, index) => {
+      const company = companies.get(item.ticker);
+      if (!company || (wareSector !== "all" && company.sector !== wareSector)) return null;
+      const itemId = normalizedSearch(item.id);
+      const itemName = normalizedSearch(item.name);
+      const identity = normalizedSearch(company.ticker + " " + company.name + " " + company.sector);
+      const trade = normalizedSearch(company.influence);
+      const matchesAny = (text: string) => variants.some((needle) => text.includes(needle));
+      const score = variants.length === 0 ? 0
+        : variants.some((needle) => itemId === needle || itemName === needle || "minecraft:" + itemId === needle) ? 0
+        : variants.some((needle) => itemId.startsWith(needle) || itemName.startsWith(needle)) ? 1
+        : matchesAny(itemId + " " + itemName + " minecraft:" + itemId) ? 2
+        : matchesAny(identity) ? 3 : matchesAny(trade) ? 4 : Infinity;
+      return Number.isFinite(score) ? { item, company, index, score } : null;
+    }).filter((entry) => entry !== null).sort((a, b) => a.score - b.score || a.index - b.index);
+    return { total: matches.length, entries: matches.slice(warePage * 40, (warePage + 1) * 40) };
+  }, [snapshot.companies, wareQuery, wareSector, warePage]);
+  const featuredItems = FEATURED_ITEM_IDS.slice(0, 4).map((id) => {
+    const item = MINECRAFT_ITEMS.find((item) => item.id === id)!;
+    return { item, company: snapshot.companies.find((company) => company.ticker === item.ticker)! };
+  });
   const ledgerCompanies = ledgerTickers.map((ticker) => snapshot.companies.find((company) => company.ticker === ticker)).filter((company): company is ListedCompany => Boolean(company));
   const charterCompany = charterTicker ? snapshot.companies.find((company) => company.ticker === charterTicker) ?? null : null;
-  const eventCompanies = snapshot.event.affectedTickers
-    .map((ticker) => snapshot.companies.find((company) => company.ticker === ticker))
-    .filter((company): company is ListedCompany => Boolean(company));
 
   const toggleLedger = (ticker: string) => {
     setLedgerTickers((current) => current.includes(ticker) ? current.filter((value) => value !== ticker) : [...current, ticker]);
@@ -438,201 +475,163 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
     setCharterTicker(ticker);
   };
 
+  useEffect(() => {
+    if (view !== "overview") return;
+    const controller = new AbortController();
+    const load = async () => {
+      setCompositeLoading(true);
+      try {
+        const response = await fetch("/api/composite-history?period=" + compositeRange, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) return;
+        const payload = await response.json() as { points: MarketHistoryPoint[] };
+        if (!controller.signal.aborted) setCompositeHistory({ range: compositeRange, points: payload.points });
+      } catch { /* Never substitute reconstructed prices for the recorded index. */ }
+      finally { if (!controller.signal.aborted) setCompositeLoading(false); }
+    };
+    void load();
+    return () => controller.abort();
+  }, [view, compositeRange, snapshot.tick]);
+
+  const compositePoints = compositeHistory?.range === compositeRange ? compositeHistory.points : [];
+  const countdown = seconds > 0 ? Math.floor(seconds / 60).toString().padStart(2, "0") + ":" + (seconds % 60).toString().padStart(2, "0") : "Clearing";
+  const asOf = easternTime(snapshot.asOf) + " " + easternZone(snapshot.asOf);
+  const periodLabel = HISTORY_RANGES.find((range) => range.value === compositeRange)?.label ?? "1D";
+  const periodChange = compositePoints.length > 1 ? compositePoints.at(-1)!.value - compositePoints[0].value : null;
+  const activeNotices = snapshot.events.length ? snapshot.events : [snapshot.event];
+  const issuerHref = (ticker: string) => "/markets/" + ticker;
+  const navItems = [
+    { label: "Overview", href: "/", value: "overview" },
+    { label: "Markets", href: "/markets", value: "markets" },
+    { label: "Price Book", href: "/price-book", value: "price-book" },
+    { label: "My Ledger", href: "/my-ledger", value: "ledger" },
+    { label: "Data", href: "/data", value: "data" },
+  ];
+  const itemImage = (id: string) => ITEM_IMAGES[id];
+  const renderPriceRows = (entries: typeof featuredItems, showQuoteLabel = true) => <div className="price-book-results">
+    {entries.map(({ item, company }) => <Link className="ware-row" key={item.id} href={issuerHref(company.ticker)}>
+      <span className="ware-identity">
+        {/* Small bundled vanilla textures need no image service. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="item-sprite" src={itemImage(item.id)} width="32" height="32" loading="lazy" alt="" />
+        <span><strong>{item.name}</strong><code>{"minecraft:" + item.id}</code></span>
+      </span>
+      <span className="ware-issuer"><b>{company.ticker}</b><small>{company.name}</small></span>
+      <span className="numeric ware-price"><b>{number(company.price)}</b><small>{showQuoteLabel ? "Crowns · issuer quote" : "Crowns"}</small></span>
+      <Move value={company.changePercent} />
+    </Link>)}
+  </div>;
+  const renderTable = (companies: ListedCompany[], preview = false, removable = false) => <div className="table-scroll" tabIndex={0} role="region" aria-label={removable ? "Watched companies" : "Listed companies"}>
+    <table className="market-table">
+      <caption className="sr-only">{removable ? "Your watched issuers and current quotes" : "Daily Official List. Quotes in Crowns; changes and volume for the current session."}</caption>
+      <thead><tr>
+        <th scope="col" className="ticker-column">Ticker</th>
+        <th scope="col" aria-sort={!preview && !removable && listingSort === "name" ? (sortDescending ? "descending" : "ascending") : undefined}>{preview || removable ? "Issuer" : <button onClick={() => chooseListingSort("name")}>Issuer <span aria-hidden="true">{listingSort === "name" ? sortDescending ? "↓" : "↑" : "↕"}</span></button>}</th>
+        {!preview && <th scope="col" className="sector-cell">Sector</th>}
+        {([ ["last", "Last"], ["change", "Change"], ["volume", "Volume"] ] as const).map(([key, label]) => <th scope="col" className={"numeric " + (key === "volume" ? "volume-cell" : "")} key={key} aria-sort={!preview && !removable && listingSort === key ? (sortDescending ? "descending" : "ascending") : undefined}>{preview || removable ? label : <button onClick={() => chooseListingSort(key)}>{label} <span aria-hidden="true">{listingSort === key ? sortDescending ? "↓" : "↑" : "↕"}</span></button>}</th>)}
+        {!preview && !removable && <th scope="col" className="principal-trade">Principal trade</th>}
+        {removable && <th scope="col"><span className="sr-only">Ledger actions</span></th>}
+      </tr></thead>
+      <tbody>{companies.map((company) => <tr key={company.ticker}>
+        <td className="ticker-cell"><Link href={issuerHref(company.ticker)}>{company.ticker}</Link></td>
+        <th scope="row"><Link href={issuerHref(company.ticker)}>{company.name}</Link><small className="mobile-ticker">{company.ticker}</small></th>
+        {!preview && <td className="sector-cell">{company.sector}</td>}
+        <td className="numeric">{number(company.price)}</td>
+        <td className="numeric"><Move value={company.changePercent} /></td>
+        <td className="numeric volume-cell" title={number(company.volume, 0)}>{compact(company.volume)}</td>
+        {!preview && !removable && <td className="principal-trade">{company.influence}</td>}
+        {removable && <td><button className="text-button" onClick={() => toggleLedger(company.ticker)} aria-label={"Remove " + company.name + " from my ledger"}>Remove</button></td>}
+      </tr>)}</tbody>
+    </table>
+  </div>;
+
   return (
-    <main>
+    <div className="exchange-app">
+      <a className="skip-link" href="#main-content">Skip to market content</a>
       <header className="site-header">
-        <div className="utility-bar">
-          <span>Official website of the simulated Royal Exchange</span>
-          <div className="utility-actions">
-            <span className="utility-message">Market data · Public access · Minecraft 1.21.1</span>
-            <button className="theme-toggle" type="button" aria-pressed={theme === "dark"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}>{theme === "dark" ? "Light mode" : "Dark mode"}</button>
-          </div>
-        </div>
+        <div className="utility-bar"><div className="utility-inner">
+          <span className="utility-status">Market {snapshot.status.toLowerCase()}</span>
+          <span>Five-minute clearing</span>
+          <span className="utility-countdown">Next clearing <b>{countdown}</b></span>
+          <span className="utility-data" role="status">{dataDelayed ? "Simulated · quotes delayed" : snapshot.historyMode === "recorded-ledger" ? "Simulated market" : "Simulated · indicative quotes"}</span>
+          <time dateTime={snapshot.asOf}>{"As of " + asOf}</time>
+        </div></div>
         <div className="masthead">
-          <a className="brand" href="#top" aria-label="Royal Exchange home">
-            <strong>Royal Exchange</strong>
-            <small>The Crown Market at Guildhall</small>
-          </a>
-          <div className="market-clock">
-            <span className="live-dot" aria-hidden="true" />
-            <span><strong>Five-minute clearing</strong><small>{snapshot.historyMode === "recorded-ledger" ? "Recorded matched trades" : "Ledger unavailable"} · {seconds > 0 ? `next auction ${seconds}s` : "clearing…"}</small></span>
-          </div>
+          <Link className="brand" href="/" aria-label="Royal Exchange home"><span className="brand-mark" aria-hidden="true">RX</span><span className="brand-wordmark"><strong>Royal Exchange</strong><small>The Crown Market at Guildhall</small></span></Link>
+          <nav className="primary-nav" aria-label="Primary navigation">{navItems.map((item) => <Link key={item.href} href={item.href} aria-current={view === item.value || view === "issuer" && item.value === "markets" ? "page" : undefined}>{item.label}</Link>)}</nav>
+          <button className="theme-toggle" type="button" aria-pressed={theme === "dark"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}>{theme === "dark" ? "Light mode" : "Dark mode"}</button>
         </div>
-        <nav className="primary-nav" aria-label="Primary navigation">
-          <a href="#overview">Market overview</a>
-          <a href="#official-list">Official list</a>
-          <a href="#price-book">Price book</a>
-          <a href="#my-ledger">My ledger</a>
-          <a href="/api/market">Market data API</a>
-        </nav>
       </header>
 
-      <section className="ticker-tape" aria-label="Live market ticker">
-        <div className="ticker-track">
-          {[...snapshot.companies, ...snapshot.companies].map((company, index) => (
-            <span className="ticker-item" key={`${company.ticker}-${index}`}>
-              <b>{company.ticker}</b><span>{number(company.price)}</span><Move value={company.changePercent} />
-            </span>
-          ))}
-        </div>
-      </section>
+      {view === "overview" && <section className="ticker-tape" aria-label="Selected issuer quotes"><div className="ticker-track" role="group" aria-label="Scroll issuer quotes" tabIndex={0}><span className="ticker-label">Last clearing</span>{snapshot.companies.slice(0, 6).map((company) => <Link className="ticker-item" key={company.ticker} href={issuerHref(company.ticker)}><b>{company.ticker}</b><span>{number(company.price)}</span><Move value={company.changePercent} /></Link>)}</div></section>}
 
-      <div className="shell" id="top">
-        <section className="market-strip" aria-label="Market status">
-          <div><span>Market</span><strong className="status-open">Open</strong></div>
-          <div><span>Data status</span><strong>Simulated · order-matched</strong></div>
-          <div><span>As of</span><strong>{easternTime(snapshot.asOf)} {easternZone(snapshot.asOf)}</strong></div>
-          <div><span>Listed issuers</span><strong>{snapshot.companies.length}</strong></div>
-          <div><span>Vanilla instruments</span><strong>{number(MINECRAFT_ITEM_COUNT, 0)}</strong></div>
-        </section>
-
-        <section className="overview" id="overview" aria-labelledby="market-heading">
-          <div className="overview-heading">
-            <div><span className="market-code">RXC</span><h1 id="market-heading">Royal Exchange Composite</h1></div>
-            <p>Reference index for the Crown market’s thirty-eight listed guilds and companies.</p>
-          </div>
-          <div className="index-line">
-            <div>
-              <strong className="index-value">{number(snapshot.composite)}</strong>
-              <p className={snapshot.compositeChange >= 0 ? "positive" : "negative"}>
-                {signed(snapshot.compositeChange)} ({signed(snapshot.compositeChangePercent, "%")}) session
-              </p>
+      <main className={"shell view-" + view} id="main-content" tabIndex={-1}>
+        {view === "overview" && <>
+          <div className="page-heading"><span className="eyebrow">Crown market overview</span><p>{easternDate(snapshot.asOf)} <span>· Quotes in Crowns</span></p></div>
+          <section className="composite-section" aria-labelledby="market-heading">
+            <div className="composite-main">
+              <div className="overview-heading"><span className="market-code">RXC</span><h1 id="market-heading">Royal Exchange Composite</h1></div>
+              <div className="index-line"><strong className="index-value">{number(snapshot.composite)}</strong><div className="index-movement"><span className={snapshot.compositeChange >= 0 ? "positive" : "negative"}>{signed(snapshot.compositeChange)} <Move value={snapshot.compositeChangePercent} /></span><small>Session movement</small></div></div>
+              <div className="history-controls"><div className="history-range" role="group" aria-label="Composite recorded history range">{HISTORY_RANGES.map((range) => <button type="button" key={range.value} className={compositeRange === range.value ? "selected" : ""} aria-pressed={compositeRange === range.value} onClick={() => setCompositeRange(range.value)}>{range.label}</button>)}</div><span className="history-status" aria-live="polite">{compositeLoading ? "Loading history…" : periodChange === null ? "" : periodLabel + " " + signed(periodChange) + " points"}</span></div>
+              <Chart unit="index points" points={compositePoints} positive={(periodChange ?? snapshot.compositeChange) >= 0} theme={theme} />
+              <div className="chart-labels"><span>{compositePoints.length ? easternDate(compositePoints[0].time) : ""}</span><span>{compositePoints.length ? "Last clearing " + easternTime(compositePoints.at(-1)!.time) + " " + easternZone(compositePoints.at(-1)!.time) : "As of " + asOf}</span></div>
             </div>
-            <div className="breadth" aria-label="Market breadth">
-              <span><b>{snapshot.advancing}</b> advancing</span>
-              <span><b>{snapshot.declining}</b> declining</span>
-              <span><b>{snapshot.unchanged}</b> unchanged</span>
-            </div>
-          </div>
-
-          <div className="focus-card">
-            <div className="focus-heading">
-              <div><span className="ticker-badge">{selected.ticker}</span><h2>{selected.name}</h2><p>{selected.sector} · {selected.influence}</p></div>
-              <div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><div className="focus-change"><Move value={selected.changePercent} /><span>session</span></div></div>
-            </div>
-            <div className="history-controls">
-              <div className="history-range" role="group" aria-label="Recorded history range">
-                {HISTORY_RANGES.map((range) => (
-                  <button
-                    type="button"
-                    key={range.value}
-                    className={historyRange === range.value ? "selected" : ""}
-                    aria-pressed={historyRange === range.value}
-                    onClick={() => setHistoryRange(range.value)}
-                  >{range.label}</button>
-                ))}
-              </div>
-              <div className="history-ledger-note" aria-live="polite">
-                <strong>{historyLoading ? `Loading ${historyLabel} history…` : chartChangeCrowns === null || chartChangePercent === null
-                  ? `${historyLabel} performance unavailable · ${chartHistory.length} plotted points`
-                  : `${historyLabel} ${signed(chartChangeCrowns)} (${signed(chartChangePercent, "%")}) · ${chartHistory.length} plotted points`}</strong>
-                <span>Ledger began {snapshot.recordedFrom ? `${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "when the first observation was stored"}</span>
-              </div>
-            </div>
-            <Chart points={chartHistory} positive={chartPositive} theme={theme} />
-            <div className="chart-labels"><span>{chartHistory.length > 0 ? easternDate(chartHistory[0].time) : "Recording started"}</span><span>{chartHistory.length > 0 ? `Latest ${easternTime(chartHistory.at(-1)!.time)} ${easternZone(chartHistory.at(-1)!.time)}` : "Awaiting observation"}</span></div>
-            <div className="focus-actions">
-              <button className="action-button" onClick={() => openCharter(selected.ticker)}>Read company charter</button>
-              <button className="action-button secondary" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from my ledger" : "Add to my ledger"}</button>
-            </div>
-            <dl className="instrument-stats">
-              <div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div>
-              <div><dt>Session open</dt><dd>{number(selected.open)}</dd></div>
-              <div><dt>High / low</dt><dd>{number(selected.high)} / {number(selected.low)}</dd></div>
-              <div><dt>Bid / ask</dt><dd>{number(selected.bid)} / {number(selected.ask)}</dd></div>
-              <div><dt>Last clearing trades</dt><dd>{number(selected.trades, 0)}</dd></div>
-              <div><dt>Session volume</dt><dd title={`${number(selected.volume, 0)} exact`}>{compact(selected.volume)}</dd></div>
-            </dl>
-          </div>
-        </section>
-
-        <aside className="market-rail" aria-label="Market briefing">
-          <section className="briefing-card">
-            <div className="section-label">Simulated market notice</div>
-            <span className={`event-tone ${snapshot.event.tone}`}>{snapshot.event.severity === "routine" ? "Routine conditions" : `${snapshot.event.severity} · ${snapshot.event.phase}`}</span>
-            <h2>{snapshot.event.title}</h2>
-            <p>{snapshot.event.description}</p>
-            <small>Affected: {snapshot.event.sector}
-              {eventCompanies.length > 0 ? ` · ${eventCompanies.map((company) => `${company.ticker} ${signed(company.changePercent, "%")}`).join(", ")} session` : ""}
-              {snapshot.event.impactPercent !== 0 ? ` · ${snapshot.event.impactPercent > 0 ? "+" : ""}${snapshot.event.impactPercent.toFixed(2)}% model pressure` : ""}
-            </small>
+            <aside className="market-summary" aria-label="Market statistics">
+              <h2 className="eyebrow">At the clearing</h2>
+              <dl className="summary-stats"><div><dt>Total session volume</dt><dd title={number(snapshot.totalVolume, 0)}>{compact(snapshot.totalVolume)}</dd></div><div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div><div><dt>Vanilla instruments</dt><dd>{number(MINECRAFT_ITEM_COUNT, 0)}</dd></div></dl>
+              <div className="market-breadth"><h2 className="eyebrow">Market breadth</h2><div className="breadth-meter" role="img" aria-label={snapshot.advancing + " advancing, " + snapshot.declining + " declining, " + snapshot.unchanged + " unchanged"}><span className="breadth-up" style={{ flexGrow: snapshot.advancing }} /><span className="breadth-down" style={{ flexGrow: snapshot.declining }} /><span className="breadth-flat" style={{ flexGrow: snapshot.unchanged }} /></div><dl className="breadth"><div><dt>Advancing</dt><dd>{snapshot.advancing}</dd></div><div><dt>Declining</dt><dd>{snapshot.declining}</dd></div><div><dt>Unchanged</dt><dd>{snapshot.unchanged}</dd></div></dl></div>
+              <Link className="quiet-link" href="/data">How the market works</Link>
+            </aside>
           </section>
-          <section className="rail-card">
-            <div className="section-label">Market summary</div>
-            <dl className="rail-stats">
-              <div><dt>Total volume</dt><dd title={`${number(snapshot.totalVolume, 0)} exact`}>{compact(snapshot.totalVolume)}</dd></div>
-              <div><dt>Listed issuers</dt><dd>{snapshot.companies.length}</dd></div>
-              <div><dt>Item coverage</dt><dd>Broad vanilla families</dd></div>
-              <div><dt>Price basis</dt><dd>Matched buy / sell orders</dd></div>
-              <div><dt>Ledger</dt><dd>{snapshot.recordedFrom ? `Since ${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "Unavailable"}</dd></div>
-              <div><dt>Clearing engine</dt><dd>{snapshot.modelStartedAt ? `Since ${easternDate(snapshot.modelStartedAt)} ${easternZone(snapshot.modelStartedAt)}` : "Local preview"}</dd></div>
-              <div><dt>Recorded ticks</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div>
-            </dl>
+          <section className="highlights" aria-labelledby="highlights-heading"><div className="section-heading"><h2 id="highlights-heading">Market Highlights</h2><div className="movers-tabs" role="group" aria-label="Market mover ranking">{(["gainers", "decliners", "active"] as const).map((mode) => <button type="button" key={mode} className={moversMode === mode ? "selected" : ""} aria-pressed={moversMode === mode} onClick={() => setMoversMode(mode)}>{mode === "active" ? "Most Active" : mode === "gainers" ? "Gainers" : "Decliners"}</button>)}</div></div>
+            <div className="highlight-list">{movers.map((company) => <Link className="highlight-entry" key={company.ticker} href={issuerHref(company.ticker)}><span className="highlight-identity"><b>{company.ticker}</b><span>{company.name}</span></span><span className="numeric">{number(company.price)}</span><span className="numeric">{moversMode === "active" ? <b title={number(company.volume, 0)}>{compact(company.volume)}<small>volume</small></b> : <Move value={company.changePercent} />}</span></Link>)}</div>{movers.length === 0 && <p className="empty-note" role="status">No issuers in this ranking at the current clearing.</p>}
           </section>
-          <section className="rail-card movers-card">
-            <div className="section-label">Largest moves</div>
-            {leaders.slice(0, 3).map((company) => <button key={company.ticker} onClick={() => setSelectedTicker(company.ticker)}><span><b>{company.ticker}</b><small>{company.name}</small></span><Move value={company.changePercent} /></button>)}
+          <section className="notice-section" aria-label="Market notices">{activeNotices.map((notice) => <article className={"market-notice severity-" + notice.severity} key={notice.id}><div><span className="eyebrow">Market Wardens · {notice.severity === "routine" ? "Bulletin" : notice.severity === "material" ? "Market notice" : notice.severity === "severe" ? "Urgent notice" : "Critical notice"}</span><h2>{notice.title}</h2></div><p>{notice.description}</p>{notice.severity !== "routine" && <small>{notice.sector + " · " + notice.phase.charAt(0).toUpperCase() + notice.phase.slice(1)}</small>}</article>)}</section>
+          <section className="catalogue-preview" aria-labelledby="book-preview-heading"><div className="section-heading"><div><span className="eyebrow">Vanilla Minecraft {MINECRAFT_VERSION}</span><h2 id="book-preview-heading">Merchant’s Price Book</h2></div><Link className="quiet-link" href="/price-book">Search all {number(MINECRAFT_ITEM_COUNT, 0)} instruments</Link></div>{renderPriceRows(featuredItems)}</section>
+          <section className="official-preview" aria-labelledby="official-preview-heading"><div className="section-heading"><div><span className="eyebrow">Daily Official List</span><h2 id="official-preview-heading">Guilds &amp; Companies</h2></div><Link className="quiet-link" href="/markets">View all {snapshot.companies.length} issuers</Link></div>{renderTable(snapshot.companies.slice(0, 4), true)}</section>
+        </>}
+
+        {view === "markets" && <>
+          <div className="page-title"><span className="eyebrow">Markets · Daily Official List</span><h1>Guilds &amp; Companies</h1><p>The Crown market’s {snapshot.companies.length} listed issuers. Quotes in Crowns.</p></div>
+          <div className="catalogue-controls"><label className="search"><span>Find an issuer</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ticker, guild, sector or principal trade" /></label><label className="sector-filter"><span>Trade sector</span><select value={sector} onChange={(event) => setSector(event.target.value)}><option value="all">All sectors</option>{sectors.map((value) => <option key={value}>{value}</option>)}</select></label></div>
+          <div className="results-caption"><span role="status">{filtered.length} of {snapshot.companies.length} listed issuers</span><span>{"As of " + asOf} · session change</span></div>
+          {renderTable(filtered)}{filtered.length === 0 && <p className="empty-note" role="status">No listed company matches your filters. Try another ticker, guild or trade.</p>}
+        </>}
+
+        {view === "price-book" && <>
+          <div className="page-title"><span className="eyebrow">Commodity register · Minecraft {MINECRAFT_VERSION}</span><h1>Merchant’s Price Book</h1><p>{number(MINECRAFT_ITEM_COUNT, 0)} individual vanilla items, mapped to their responsible guilds. Prices are linked issuer quotes, rather than individual item valuations.</p></div>
+          <div className="catalogue-controls price-book-controls"><label className="search"><span>Find a commodity</span><input type="search" value={wareQuery} onChange={(event) => { setWareQuery(event.target.value); setWarePage(0); }} placeholder="Item name, registry ID, guild or trade" /></label><label className="sector-filter"><span>Commodity trade</span><select value={wareSector} onChange={(event) => { setWareSector(event.target.value); setWarePage(0); }}><option value="all">All trades</option>{sectors.map((value) => <option key={value}>{value}</option>)}</select></label></div>
+          <div className="suggestion-row"><span>Quick searches</span>{PRICE_BOOK_SUGGESTIONS.map((suggestion) => <button key={suggestion} onClick={() => { setWareQuery(suggestion); setWarePage(0); }}>{suggestion}</button>)}</div>
+          <div className="results-caption"><span role="status">{number(priceBookResults.total, 0)} {wareQuery || wareSector !== "all" ? "matching" : "listed"} instruments{priceBookResults.total > 0 ? " · " + (warePage * 40 + 1) + "–" + Math.min((warePage + 1) * 40, priceBookResults.total) : ""}</span><span>{"As of " + asOf}</span></div>
+          <div className="ware-table-heading" aria-hidden="true"><span>Commodity / registry</span><span>Responsible issuer</span><span className="numeric">Linked quote</span><span className="numeric">Change</span></div>
+          {renderPriceRows(priceBookResults.entries, false)}{priceBookResults.total === 0 && <p className="empty-note" role="status">No Minecraft item matches these filters. Try an item name or choose another trade.</p>}
+          {priceBookResults.total > 40 && <nav className="pagination" aria-label="Price Book pages"><button className="action-button secondary" disabled={warePage === 0} onClick={() => setWarePage((page) => page - 1)}>Previous</button><span>{"Page " + (warePage + 1) + " of " + Math.ceil(priceBookResults.total / 40)}</span><button className="action-button secondary" disabled={(warePage + 1) * 40 >= priceBookResults.total} onClick={() => setWarePage((page) => page + 1)}>Next</button></nav>}
+        </>}
+
+        {view === "ledger" && <>
+          <div className="page-title"><span className="eyebrow">Personal Merchant’s Ledger</span><h1>My Ledger</h1><p>Your watchlist stays in this browser and is never shared.</p></div>
+          {!ledgerReady ? <p className="empty-note" role="status">Opening your ledger…</p> : ledgerCompanies.length ? <><div className="results-caption"><span>{ledgerCompanies.length} watched {ledgerCompanies.length === 1 ? "issuer" : "issuers"}</span><Link className="quiet-link" href="/markets">Find more issuers</Link></div>{renderTable(ledgerCompanies, false, true)}</> : <div className="ledger-empty"><h2>No issuers in your ledger</h2><p>Add an issuer from its quote page to follow it here.</p><Link className="action-button" href="/markets">Browse the Official List</Link></div>}
+        </>}
+
+        {view === "issuer" && <>
+          <Link className="quiet-link breadcrumb" href="/markets">Markets / Daily Official List</Link>
+          <section className="issuer-detail" aria-labelledby="issuer-heading">
+            <div className="focus-heading"><div><span className="eyebrow">{selected.ticker + " · " + selected.sector}</span><h1 id="issuer-heading">{selected.name}</h1><p>{selected.influence}</p></div><div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><div className="focus-change"><span className={selected.change >= 0 ? "positive" : "negative"}>{signed(selected.change)}</span><Move value={selected.changePercent} /><small>session</small></div></div></div>
+            <div className="issuer-actions"><button className="action-button" onClick={() => openCharter(selected.ticker)}>Company Charter</button><button className="action-button secondary" aria-pressed={ledgerTickers.includes(selected.ticker)} onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from Ledger" : "Add to Ledger"}</button><span>{"As of " + asOf}</span></div>
+            <div className="issuer-grid"><div className="issuer-chart"><div className="history-controls"><div className="history-range" role="group" aria-label="Recorded history range">{HISTORY_RANGES.map((range) => <button type="button" key={range.value} className={historyRange === range.value ? "selected" : ""} aria-pressed={historyRange === range.value} onClick={() => setHistoryRange(range.value)}>{range.label}</button>)}</div><div className="history-status" aria-live="polite">{historyLoading ? "Loading " + historyLabel + " history…" : chartChangeCrowns === null || chartChangePercent === null ? historyLabel + " performance unavailable" : historyLabel + " " + signed(chartChangeCrowns) + " (" + signed(chartChangePercent, "%") + ")"}</div></div><Chart points={chartHistory} positive={chartPositive} theme={theme} /><div className="chart-labels"><span>{chartHistory.length ? easternDate(chartHistory[0].time) : "Awaiting observation"}</span><span>{"As of " + asOf}</span></div><p className="history-disclosure">Recorded auctions only.{snapshot.recordedFrom ? " History begins " + easternDate(snapshot.recordedFrom) + "." : ""}</p></div>
+              <dl className="instrument-stats"><div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div><div><dt>Open</dt><dd>{number(selected.open)}</dd></div><div><dt>High / low</dt><dd>{number(selected.high) + " / " + number(selected.low)}</dd></div><div><dt>Bid / ask</dt><dd>{number(selected.bid) + " / " + number(selected.ask)}</dd></div><div><dt>Session volume</dt><dd>{number(selected.volume, 0)}</dd></div><div><dt>Last clearing trades</dt><dd>{number(selected.trades, 0)}</dd></div></dl>
+            </div>
           </section>
-        </aside>
+          <section className="issuer-wares"><div className="section-heading"><div><span className="eyebrow">Principal wares</span><h2>In the Price Book</h2></div><Link className="quiet-link" href="/price-book">Open the commodity register</Link></div>{renderPriceRows(MINECRAFT_ITEMS.filter((item) => item.ticker === selected.ticker).slice(0, 6).map((item) => ({ item, company: selected })))}</section>
+        </>}
 
-        <section className="exchange-tools" aria-label="Merchant tools">
-          <article className="tool-card price-book" id="price-book">
-            <div className="section-label">Merchant’s Price Book</div>
-            <h2>Individual Minecraft wares</h2>
-            <p className="tool-intro">Search {number(MINECRAFT_ITEM_COUNT, 0)} individual vanilla {MINECRAFT_VERSION} items. Each entry shows its responsible issuer and linked simulated market quote.</p>
-            <label className="tool-search"><span className="sr-only">Search the Merchant’s Price Book</span><input value={wareQuery} onChange={(event) => setWareQuery(event.target.value)} placeholder="Try redstone, maps, wool…" /></label>
-            <div className="suggestion-row" aria-label="Suggested wares">{PRICE_BOOK_SUGGESTIONS.map((suggestion) => <button key={suggestion} onClick={() => setWareQuery(suggestion)}>{suggestion}</button>)}</div>
-            <div className="price-book-count" aria-live="polite">{wareQuery.trim() ? `${priceBookResults.total} matching individual items${priceBookResults.total > priceBookResults.entries.length ? ` · showing first ${priceBookResults.entries.length}` : ""}` : "Featured individual items"}</div>
-            <div className="price-book-results" aria-live="polite">
-              {priceBookResults.entries.map(({ item, company }) => (
-                <button className="price-book-entry" key={item.id} onClick={() => openCharter(company.ticker)}>
-                  <span><strong>{item.name}</strong><code>minecraft:{item.id}</code></span>
-                  <span className="price-book-quote"><small>Linked quote · {company.ticker}</small><b>{number(company.price)} Crowns</b><Move value={company.changePercent} /></span>
-                  <small>{company.name} · {company.sector}</small>
-                </button>
-              ))}
-              {priceBookResults.entries.length === 0 && <p className="empty-note">No individual Minecraft item matches that search.</p>}
-            </div>
-          </article>
-
-          <article className="tool-card personal-ledger" id="my-ledger">
-            <div className="section-label">Personal Merchant’s Ledger</div>
-            <h2>Your watched companies</h2>
-            <p className="tool-intro">Pinned only on this device. Nothing here is sent to Minecraft or the public exchange.</p>
-            <button className="action-button ledger-add" onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? `Remove ${selected.ticker}` : `Add ${selected.ticker}`}</button>
-            <div className="ledger-list" aria-live="polite">
-              {ledgerCompanies.map((company) => (
-                <div className="ledger-entry" key={company.ticker}>
-                  <button onClick={() => openCharter(company.ticker)}><span><b>{company.ticker}</b><strong>{company.name}</strong></span><span><b>{number(company.price)}</b><Move value={company.changePercent} /></span></button>
-                  <button className="ledger-remove" onClick={() => toggleLedger(company.ticker)} aria-label={`Remove ${company.name} from my ledger`}>Remove</button>
-                </div>
-              ))}
-              {ledgerCompanies.length === 0 && <p className="empty-note">Your ledger is empty. Add the selected company or open a charter to pin one.</p>}
-            </div>
-          </article>
-        </section>
-
-        <section className="listings" id="official-list" aria-labelledby="listings-title">
-          <div className="listings-head">
-            <div><div className="section-label">Daily Official List</div><h2 id="listings-title">Guilds and Companies</h2></div>
-            <label className="search"><span className="sr-only">Search guilds, trades and wares</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search guild, trade or ware" /></label>
-          </div>
-          <div className="market-table" role="table" aria-label="Listed companies">
-            <div className="market-row table-header" role="row"><span>Issuer</span><span>Last</span><span>Change</span><span>Volume</span><span>Principal trade</span></div>
-            {filtered.map((company) => (
-              <button className={`market-row ${selected.ticker === company.ticker ? "selected" : ""}`} role="row" key={company.ticker} onClick={() => setSelectedTicker(company.ticker)}>
-                <span className="company-cell"><b>{company.ticker}</b><span><strong>{company.name}</strong><small>{company.sector}</small></span></span>
-                <span data-label="Price"><strong>{number(company.price)}</strong><small> Crowns</small></span>
-                <span data-label="Session"><Move value={company.changePercent} /></span>
-                <span data-label="Volume">{compact(company.volume)}</span>
-                <span className="influence-cell" data-label="Influences">{company.influence}</span>
-              </button>
-            ))}
-            {filtered.length === 0 && <p className="empty-note listings-empty" role="status">No listed company matches “{query.trim()}”. Try a ticker, guild, sector, or trade.</p>}
-          </div>
-        </section>
-      </div>
-
+        {view === "data" && <>
+          <div className="page-title"><span className="eyebrow">Public record · Methodology</span><h1>Market Data &amp; Methodology</h1><p>The Royal Exchange is a fictional Minecraft financial institution. Its market runs continuously; all prices and activity are simulated.</p></div>
+          <div className="data-layout"><div className="methodology"><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. A shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, momentum and market notices influence the participants. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>Longer ranges sample actual recorded observations. Gaps remain gaps in the record; the plotted line connects observations and does not claim trades between them.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
+          <aside className="data-register"><section><h2 className="eyebrow">Publication status</h2><dl className="data-facts"><div><dt>Data</dt><dd>{snapshot.historyMode === "recorded-ledger" ? "Recorded clearing prices" : "Indicative quotes"}</dd></div><div><dt>As of</dt><dd>{easternDate(snapshot.asOf) + " · " + asOf}</dd></div><div><dt>Next clearing</dt><dd>{countdown}</dd></div><div><dt>Recorded since</dt><dd>{snapshot.recordedFrom ? easternDate(snapshot.recordedFrom) : "Not yet available"}</dd></div><div><dt>Recorded clearings</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div><div><dt>Model</dt><dd>{snapshot.modelVersion}</dd></div></dl></section>
+          <section><h2>Public API</h2><p>The same market record, available as JSON.</p><ul className="api-links"><li><a href="/api/market">Full market snapshot <code>/api/market</code></a></li><li><a href="/api/v1/overview">Market overview <code>/api/v1/overview</code></a></li><li><a href="/api/composite-history?period=24h">Recorded RXC history <code>/api/composite-history</code></a></li><li><a href="/openapi.json">API / OpenAPI schema <code>/openapi.json</code></a></li></ul><p className="technical-note">Composite history accepts period=24h, 7d, 30d or all. At most 120 recorded points are returned. The read-only MCP endpoint is <code>/mcp</code>.</p></section>
+          <section><h2>Institutional references</h2><p>Guild names and trade streets draw on London’s mercantile history.</p><ul className="reference-links"><li><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City of London livery companies</a></li><li><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Company of Merchant Staplers</a></li></ul></section></aside></div>
+        </>}
+      </main>
       {charterCompany && (() => {
         const record = charterRecord(charterCompany);
         const isPinned = ledgerTickers.includes(charterCompany.ticker);
@@ -648,8 +647,8 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
                 <div><dt>Present standing</dt><dd>{standingFor(charterCompany)}</dd></div>
                 <div><dt>Reference price</dt><dd>{number(charterCompany.price)} Crowns</dd></div>
                 <div><dt>Session movement</dt><dd><Move value={charterCompany.changePercent} /></dd></div>
-                <div><dt>Recorded history</dt><dd>{snapshot.recordedFrom ? `From ${easternDate(snapshot.recordedFrom)} ${easternZone(snapshot.recordedFrom)}` : "Awaiting ledger"}</dd></div>
-                <div><dt>Recorded observations</dt><dd>{snapshot.recordedObservations}</dd></div>
+
+
               </dl>
               <blockquote>{record.note}</blockquote>
               <div className="charter-actions"><button className="action-button" onClick={() => toggleLedger(charterCompany.ticker)}>{isPinned ? "Remove from my ledger" : "Add to my ledger"}</button><button className="action-button secondary" onClick={() => setCharterTicker(null)}>Return to the market</button></div>
@@ -658,11 +657,7 @@ export function MarketDashboard({ initialSnapshot }: { initialSnapshot: MarketSn
         );
       })()}
 
-      <footer>
-        <div><strong>Royal Exchange</strong><span>Fictional Crown market · continuously simulated · observations recorded as published</span><a className="api-link" href="/api/market">Public market data API</a><a className="api-link" href="/openapi.json">ChatGPT OpenAPI schema</a></div>
-        <div className="sources"><span>Historical names:</span><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City guilds</a><a href="https://www.londononline.co.uk/cityoflondon/streets/" target="_blank" rel="noreferrer">Trade streets</a><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Staple</a></div>
-        <div><span>As of</span><time dateTime={snapshot.asOf}>{easternTime(snapshot.asOf)} {easternZone(snapshot.asOf)}</time></div>
-      </footer>
-    </main>
+      <footer className="institutional-footer"><div><strong>Royal Exchange</strong><span>The Crown Market at Guildhall</span></div><p>Fictional exchange · Simulated market data</p><Link href="/data">Public data &amp; methodology</Link></footer>
+    </div>
   );
 }

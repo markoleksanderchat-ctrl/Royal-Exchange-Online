@@ -7,6 +7,7 @@ import { handleAssistantApi } from "./assistant-api";
 import { handleAssistantV1 } from "./assistant-v1";
 import { handleRoyalExchangeMcp } from "./mcp";
 import { handleOpenApi } from "./openapi";
+import { handleCompositeHistory } from "./composite-history";
 
 interface Env {
   ASSETS: Fetcher;
@@ -29,6 +30,8 @@ interface Env {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/composite-history") return handleCompositeHistory(request, env);
 
     if (request.method === "GET" && url.pathname === "/api/market") {
       if (!env.DB) return Response.json(getMarketSnapshot(), { headers: marketHeaders("unavailable") });

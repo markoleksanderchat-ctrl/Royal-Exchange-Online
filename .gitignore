@@ -41,3 +41,8 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/.tmp/
+.dev.vars*
+*.key
+*.p12
+*.pfx
