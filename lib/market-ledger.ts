@@ -5,6 +5,7 @@ import {
   initialIssuerState,
   MARKET_MODEL_VERSION,
   MARKET_SESSION_MINUTES,
+  MAX_HISTORY_POINTS,
   marketSessionStartTick,
   marketTickAt,
   MINUTE,
@@ -411,7 +412,7 @@ export async function getRecordedIssuerHistory(
   maximumPoints = 120,
 ): Promise<MarketHistoryPoint[]> {
   const cutoffTick = periodMinutes === null ? 0 : Math.floor(Date.now() / MINUTE) - periodMinutes;
-  const limit = Math.max(1, Math.min(120, Math.floor(maximumPoints)));
+  const limit = Math.max(1, Math.min(MAX_HISTORY_POINTS, Math.floor(maximumPoints)));
   const bounds = await db.batch<{ tick: number }>([
     db.prepare("SELECT tick FROM issuer_ticks WHERE ticker = ? AND tick >= ? ORDER BY tick ASC LIMIT 1").bind(ticker, cutoffTick),
     db.prepare("SELECT tick FROM issuer_ticks WHERE ticker = ? AND tick >= ? ORDER BY tick DESC LIMIT 1").bind(ticker, cutoffTick),
@@ -420,7 +421,7 @@ export async function getRecordedIssuerHistory(
   const last = bounds[1].results[0]?.tick;
   if (first === undefined || last === undefined) return [];
 
-  // At most 120 indexed seeks, irrespective of retained history size. Each
+  // Bounded indexed seeks, irrespective of retained history size. Each
   // target picks a real observation; gaps never manufacture market prices.
   const rows = await db.prepare(`WITH RECURSIVE samples(n) AS (
       SELECT 0 UNION ALL SELECT n + 1 FROM samples WHERE n + 1 < ?1

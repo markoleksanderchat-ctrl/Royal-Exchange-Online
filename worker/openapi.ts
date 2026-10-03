@@ -92,7 +92,7 @@ export const ROYAL_EXCHANGE_OPENAPI = {
         parameters: [
           { name: "identifier", in: "path", required: true, schema: { type: "string", minLength: 1, maxLength: 100 } },
           { name: "period", in: "query", schema: { type: "string", enum: ["1h", "6h", "24h", "7d", "30d", "all"], default: "24h" } },
-          { name: "historyPoints", in: "query", schema: { type: "integer", minimum: 1, maximum: 120, default: 48 } },
+          { name: "historyPoints", in: "query", schema: { type: "integer", minimum: 1, maximum: 576, default: 48 } },
         ],
         responses: { "200": successResponse("Issuer detail and performance.", { issuer: { type: "object", additionalProperties: true }, activeNotices: { type: "array", items: { type: "object", additionalProperties: true } } }, ["issuer", "activeNotices"]), "400": errorResponse, "404": errorResponse, "409": errorResponse },
       },

@@ -1,4 +1,4 @@
-export const MARKET_MODEL_VERSION = "royal-exchange-clearing-v3" as const;
+export const MARKET_MODEL_VERSION = "royal-exchange-clearing-v4" as const;
 
 export type MarketHistoryPoint = {
   time: string;
@@ -154,6 +154,7 @@ type Order = {
 
 export const MINUTE = 60_000;
 export const MARKET_SESSION_MINUTES = 5;
+export const MAX_HISTORY_POINTS = 576;
 const MARKET_TIME_ZONE = "America/New_York";
 const MARKET_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: MARKET_TIME_ZONE,
@@ -241,8 +242,14 @@ export const COMPANIES: CompanyDefinition[] = [
 const PARTICIPANTS: MarketParticipant[] = ["market-maker", "guild-fund", "merchant-house", "factor", "speculator"];
 
 function hash(value: number): number {
-  const x = Math.sin(value * 12.9898 + 78.233) * 43758.5453;
-  return x - Math.floor(x);
+  return mixedUnit(Math.round(value * 1_000_003));
+}
+
+function mixedUnit(seed: number) {
+  let value = seed >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
+  value = Math.imul(value ^ (value >>> 15), 0x735a2d97);
+  return ((value ^ (value >>> 15)) >>> 0) / 4_294_967_296;
 }
 
 function tickerSeed(ticker: string) {
@@ -250,11 +257,17 @@ function tickerSeed(ticker: string) {
 }
 
 function unit(tick: number, ticker: string, salt: number) {
-  return hash(tick * 0.000173 + tickerSeed(ticker) * 0.0137 + salt * 17.193);
+  return mixedUnit(Math.imul(tick, 0x9e3779b1) ^ tickerSeed(ticker) ^ Math.imul(salt, 0x85ebca6b));
 }
 
 function signedUnit(tick: number, ticker: string, salt: number) {
   return unit(tick, ticker, salt) * 2 - 1;
+}
+
+// Box-Muller innovations: deterministic draws, not a periodic price wave.
+function normalUnit(tick: number, ticker: string, salt: number) {
+  return Math.sqrt(-2 * Math.log(Math.max(1e-9, unit(tick, ticker, salt))))
+    * Math.cos(2 * Math.PI * unit(tick, ticker, salt + 1));
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -369,21 +382,24 @@ function createOrders(
   const sells: Order[] = [];
   const valueGap = (fairValue - state.lastPrice) / Math.max(0.01, state.lastPrice);
   const imbalance = demandIndex - supplyIndex;
-  const signal = clamp(valueGap * 0.62 + imbalance * 0.018 + momentum * 0.22, -0.045, 0.045);
-  const inventorySkew = clamp(state.marketMakerInventory / 18_000, -1, 1) * sessionSigma * 0.45;
-  const spreadRate = clamp(0.0009 + sessionSigma * 0.55 + Math.abs(imbalance) * 0.0008, 0.0012, 0.012);
-  const center = state.lastPrice * (1 + signal * 0.42);
+  // Fundamentals exert a slow, bounded influence. Order flow can carry prices
+  // away from fair value without a forced return on the next auction.
+  const valuePressure = clamp(valueGap * 0.0015, -0.00015, 0.00015);
+  const signal = clamp(momentum + valuePressure + imbalance * 0.0015, -0.02, 0.02);
+  const inventorySkew = clamp(state.marketMakerInventory / 18_000, -1, 1) * sessionSigma * 0.08;
+  const spreadRate = clamp(0.0002 + sessionSigma * 0.35 + Math.abs(imbalance) * 0.0003, 0.0003, 0.004);
+  const center = state.lastPrice * (1 + signal);
 
   for (let index = 0; index < 12; index += 1) {
     const participant = PARTICIPANTS[index % PARTICIPANTS.length];
-    const participantBias = participant === "guild-fund" ? valueGap * 0.5
-      : participant === "speculator" ? momentum * 0.5
-        : participant === "merchant-house" ? imbalance * 0.012
+    const participantBias = participant === "guild-fund" ? valuePressure * 0.4
+      : participant === "speculator" ? momentum * 0.08
+        : participant === "merchant-house" ? imbalance * 0.0005
           : 0;
-    const buyNoise = signedUnit(tick, definition.ticker, 100 + index) * sessionSigma * 1.35;
-    const sellNoise = signedUnit(tick, definition.ticker, 200 + index) * sessionSigma * 1.35;
-    const buyAggression = unit(tick, definition.ticker, 300 + index) * sessionSigma * 1.8;
-    const sellAggression = unit(tick, definition.ticker, 400 + index) * sessionSigma * 1.8;
+    const buyNoise = normalUnit(tick, definition.ticker, 100 + index * 2) * sessionSigma * 0.2;
+    const sellNoise = normalUnit(tick, definition.ticker, 200 + index * 2) * sessionSigma * 0.2;
+    const buyAggression = unit(tick, definition.ticker, 300 + index) * sessionSigma * 0.85;
+    const sellAggression = unit(tick, definition.ticker, 400 + index) * sessionSigma * 0.85;
     const sizeBase = (18 + unit(tick, definition.ticker, 500 + index) * 105) * definition.weight * Math.sqrt(elapsed);
     const quantity = Math.max(1, Math.round(sizeBase * (1 + Math.abs(signal) * 12)));
     const makerAdjustment = participant === "market-maker" ? -inventorySkew : 0;
@@ -433,11 +449,21 @@ export function runClearingSession(
     + 0.04 * (1 + previous.dividendYield * 5)
     - previous.debtRatio * 0.045;
   const fairValue = roundPrice(definition.base * clamp(fundamentalMultiple, 0.38, 2.5));
-  const volatilityTarget = definition.volatility
-    * (0.72 + Math.abs(macro) * 0.45 + Math.abs(sector) * 0.28 + Math.abs(anomalySignal) * 1.8 + Math.abs(previous.momentum) * 3.5);
-  const volatility = approach(previous.volatility, clamp(volatilityTarget, definition.volatility * 0.55, definition.volatility * 2.6), 0.18, elapsed);
-  const sessionSigma = clamp(volatility * 0.055 * Math.sqrt(elapsed), 0.0011, 0.025);
-  const momentumBefore = previous.momentum * Math.pow(0.72, elapsed);
+  const regimeDraw = unit(Math.floor(tick / 60), "RXC", 67);
+  const regime = regimeDraw < 0.75 ? 0.65 : regimeDraw < 0.95 ? 1.6 : 3;
+  const priorVolatility = clamp(previous.volatility, definition.volatility * 0.45, definition.volatility * 3.5);
+  const sessionSigma = clamp(priorVolatility * 0.0095 * Math.sqrt(Math.min(elapsed, 6)), 0.00015, 0.0045);
+  const shock = (unit(tick, "RXC", 73) < 0.003
+    ? signedUnit(tick, "RXC", 74) > 0 ? 4 : -4 : 0)
+    + (unit(tick, definition.ticker, 75) < 0.002
+      ? signedUnit(tick, definition.ticker, 76) > 0 ? 5 : -5 : 0);
+  // Persisted order-flow memory survives restarts. Shared innovations correlate
+  // constituents; issuer innovations and rare shocks supply local variation.
+  const innovation = normalUnit(tick, "RXC", 31) * 0.4
+    + normalUnit(tick, definition.sector, 41) * 0.12
+    + normalUnit(tick, definition.ticker, 51) * 0.45 + shock;
+  const momentumBefore = clamp(previous.momentum * Math.pow(0.45, elapsed)
+    + sessionSigma * innovation, -0.02, 0.02);
   const { buys, sells, spreadRate } = createOrders(
     definition, previous, tick, fairValue, demandIndex, supplyIndex, momentumBefore, sessionSigma, elapsed,
   );
@@ -495,7 +521,14 @@ export function runClearingSession(
   const sessionLow = newSession ? executionLow : Math.min(previous.sessionLow, executionLow);
   const sessionVolume = (newSession ? 0 : previous.sessionVolume) + quantity;
   const returnRate = previous.lastPrice === 0 ? 0 : (price - previous.lastPrice) / previous.lastPrice;
-  const momentum = clamp(momentumBefore + returnRate * 0.38, -0.08, 0.08);
+  const momentum = clamp(momentumBefore * 0.9 + returnRate * 0.1, -0.02, 0.02);
+  // Conditional variance retains recent turbulence, then decays gradually.
+  // No oscillator or central-price reset determines the resulting trade price.
+  const volatility = clamp(Math.sqrt(
+    Math.pow(0.92, elapsed) * priorVolatility ** 2
+    + (1 - Math.pow(0.92, elapsed)) * (0.625 * (definition.volatility * regime) ** 2
+      + 0.375 * (Math.abs(returnRate) / 0.0095) ** 2),
+  ), definition.volatility * 0.45, definition.volatility * 3.5);
   const state: IssuerMarketState = {
     ticker: definition.ticker,
     lastTick: tick,

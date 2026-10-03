@@ -38,16 +38,21 @@ test("RXC history returns real observations across gaps with indexed, bounded sa
   const now = (start + 8999 * 5) * 60000;
   for (const period of ["24h", "7d", "30d", "all"]) {
     const points = await readCompositeHistory(db, period, now);
-    assert.ok(points.length > 1 && points.length <= 120);
+    assert.ok(points.length > 1 && points.length <= 576);
     assert.ok(points.every((point) => values.get(point.time) === point.value), "no interpolated prices");
     assert.ok(points.every((point, i) => !i || Date.parse(point.time) > Date.parse(points[i - 1].time)));
     assert.equal(points.at(-1).time, new Date(now).toISOString());
-    if (period === "24h") assert.ok(Date.parse(points[0].time) >= now - 1440 * 60000);
+    if (period === "24h") {
+      assert.ok(Date.parse(points[0].time) >= now - 1440 * 60000);
+      assert.deepEqual(points, [...values].filter(([time]) => Date.parse(time) >= now - 1440 * 60000)
+        .map(([time, value]) => ({ time, value })), "daily history retains every actual clearing");
+      assert.ok(points.length > 240, "daily history is denser than the old 120-point cap");
+    }
     if (period === "all") assert.equal(points[0].time, new Date((start + 5) * 60000).toISOString());
   }
   assert.ok(statements.every((sql) => !/INSERT|UPDATE|DELETE|CREATE|ALTER/i.test(sql)), "production reader is SELECT-only");
   const sql = statements.find((sql) => sql.startsWith("WITH RECURSIVE"));
-  const plan = sqlite.prepare("EXPLAIN QUERY PLAN " + sql).all(start, start + 8999 * 5);
+  const plan = sqlite.prepare("EXPLAIN QUERY PLAN " + sql).all(start, start + 8999 * 5, 576);
   assert.ok(plan.some((row) => /SEARCH market_ticks USING INTEGER PRIMARY KEY/.test(row.detail)));
   assert.ok(!plan.some((row) => /SCAN market_ticks/.test(row.detail)));
   sqlite.close();

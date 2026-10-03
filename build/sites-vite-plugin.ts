@@ -17,12 +17,29 @@ async function exists(path: string): Promise<boolean> {
 // Packages Sites metadata and migrations after Vite finishes compiling.
 export function sites(): Plugin {
   let root = process.cwd();
+  let fontCachePrefix = "";
+  let assetsDirectory = "assets";
 
   return {
     name: "sites",
     apply: "build",
     configResolved(config) {
       root = config.root;
+      fontCachePrefix = resolve(root, ".vinext", "fonts").replaceAll("\\", "/");
+      assetsDirectory = config.build.assetsDir;
+    },
+    transform: {
+      order: "post",
+      handler(code) {
+        // Vinext's cached font CSS uses forward slashes, but its Windows
+        // rewrite compares native backslashes. Preserve the same self-hosted
+        // fonts by completing that rewrite before they reach the browser.
+        if (!code.includes("_selfHostedCSS") || !code.includes(fontCachePrefix)) return null;
+        return {
+          code: code.split(fontCachePrefix).join(`/${assetsDirectory}/_vinext_fonts`),
+          map: null,
+        };
+      },
     },
     async closeBundle() {
       const outputDirectory = resolve(root, "dist", ".openai");

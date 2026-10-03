@@ -1,4 +1,4 @@
-import type { MarketHistoryPoint } from "../lib/market";
+import { MAX_HISTORY_POINTS, type MarketHistoryPoint } from "../lib/market.ts";
 
 const PERIOD_MINUTES = { "24h": 1440, "7d": 10080, "30d": 43200, all: null } as const;
 
@@ -13,15 +13,16 @@ export async function readCompositeHistory(db: D1Database, period: keyof typeof 
   const first = bounds[0].results[0]?.tick;
   const last = bounds[1].results[0]?.tick;
   if (first === undefined || last === undefined) return [];
-  // At most 120 primary-key seeks, including both ends; missing auctions are never manufactured.
+  // Keep every five-minute observation in a daily range. Longer ranges retain
+  // bounded primary-key seeks; missing auctions are never manufactured.
   const rows = await db.prepare(`WITH RECURSIVE samples(n) AS (
-    SELECT 0 UNION ALL SELECT n + 1 FROM samples WHERE n + 1 < 120
+    SELECT 0 UNION ALL SELECT n + 1 FROM samples WHERE n + 1 < ?3
   ), targets AS (
-    SELECT ?1 + CAST((?2 - ?1) * n / 119 AS INTEGER) AS target FROM samples
+    SELECT ?1 + CAST((?2 - ?1) * n / (?3 - 1) AS INTEGER) AS target FROM samples
   ) SELECT observed_at, composite FROM market_ticks WHERE tick IN (
     SELECT (SELECT tick FROM market_ticks WHERE tick >= target AND tick <= ?2 ORDER BY tick ASC LIMIT 1)
     FROM targets
-  ) ORDER BY tick`).bind(first, last).all<{ observed_at: string; composite: number }>();
+  ) ORDER BY tick`).bind(first, last, MAX_HISTORY_POINTS).all<{ observed_at: string; composite: number }>();
   return rows.results.map((row) => ({ time: row.observed_at, value: row.composite }));
 }
 

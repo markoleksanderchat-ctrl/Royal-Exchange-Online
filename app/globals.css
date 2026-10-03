@@ -145,7 +145,7 @@ small { font-size: 12px; }
 .chart-recording { min-height: 275px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 28px; background: var(--surface-subtle); border-block: 1px solid var(--line-soft); text-align: center; }
 .chart-recording strong { color: var(--heading); font: 400 22px var(--font-serif); }
 .chart-recording > span:last-child { max-width: 310px; color: var(--ink-soft); font-size: 14px; }
-.chart-crosshair { position: absolute; top: 14px; bottom: 18px; width: 1px; background: var(--chart-label); pointer-events: none; }
+.chart-crosshair { position: absolute; top: 14px; bottom: 32px; width: 1px; background: var(--chart-label); pointer-events: none; }
 .chart-tooltip { position: absolute; z-index: 2; top: 20px; display: grid; gap: 4px; width: 240px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line-dark); background: var(--surface); color: var(--ink); pointer-events: none; transform: translateX(-50%); box-shadow: 0 3px 8px rgba(0,0,0,.12); }
 .chart-tooltip span { font-size: 12px; }
 .chart-tooltip strong { font-size: 14px; font-variant-numeric: tabular-nums; }

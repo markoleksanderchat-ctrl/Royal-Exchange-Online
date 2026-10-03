@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ITEM_IMAGES } from "./item-images";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ListedCompany, MarketHistoryPoint, MarketSnapshot } from "../lib/market";
+import { priceAxis, timeAxis } from "../lib/chart-scale";
 import { MINECRAFT_ITEM_COUNT, MINECRAFT_ITEMS, MINECRAFT_VERSION } from "./minecraft-items";
 import { charterRecord, PRICE_BOOK_SUGGESTIONS, standingFor } from "./market-records";
 
@@ -68,7 +69,7 @@ function easternZone(value: string) {
     .find((part) => part.type === "timeZoneName")?.value ?? "ET";
 }
 
-function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode; unit?: string }) {
+function Chart({ points, positive, theme, unit = "Crowns", reference }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode; unit?: string; reference?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -87,30 +88,45 @@ function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHis
       context.clearRect(0, 0, bounds.width, bounds.height);
 
       const values = points.map((point) => point.value);
-      const low = Math.min(...values);
-      const high = Math.max(...values);
-      const range = Math.max(0.01, high - low);
+      const { minimum: low, maximum: high, ticks } = priceAxis(values, reference);
+      const range = high - low;
       const left = 2;
-      const right = bounds.width - 62;
+      const right = bounds.width - 72;
       const top = 14;
-      const bottom = bounds.height - 18;
+      const bottom = bounds.height - 32;
+      const priceY = (value: number) => bottom - ((value - low) / range) * (bottom - top);
 
       const styles = window.getComputedStyle(canvas);
       context.strokeStyle = styles.getPropertyValue("--chart-grid").trim() || "rgba(92, 62, 31, .18)";
       context.lineWidth = 1;
       context.font = "12px " + styles.fontFamily;
       context.fillStyle = styles.getPropertyValue("--chart-label").trim();
-      for (let line = 0; line < 4; line += 1) {
-        const y = top + ((bottom - top) * line) / 3;
+      for (const value of ticks) {
+        const y = priceY(value);
         context.beginPath();
         context.moveTo(left, y);
         context.lineTo(right, y);
         context.stroke();
-        context.fillText(number(high - range * line / 3), right + 9, y + 4);
+        context.fillText(number(value), right + 9, y + 4);
       }
 
       const startTime = Date.parse(points[0].time);
       const timeSpan = Math.max(1, Date.parse(points.at(-1)!.time) - startTime);
+      context.save();
+      context.globalAlpha = 0.65;
+      for (const tick of timeAxis(points, right - left)) {
+        const x = left + (right - left) * (tick.time - startTime) / timeSpan;
+        context.beginPath();
+        context.moveTo(x, top);
+        context.lineTo(x, bottom);
+        context.stroke();
+      }
+      context.restore();
+      for (const tick of timeAxis(points, right - left)) {
+        const x = left + (right - left) * (tick.time - startTime) / timeSpan;
+        const labelWidth = context.measureText(tick.label).width;
+        context.fillText(tick.label, Math.max(left, Math.min(right - labelWidth, x - labelWidth / 2)), bottom + 22);
+      }
       const coordinates = points.map((point, index) => ({
         x: left + (right - left) * (timeSpan === 1 ? index / (points.length - 1) : (Date.parse(point.time) - startTime) / timeSpan),
         y: bottom - ((point.value - low) / range) * (bottom - top),
@@ -129,15 +145,31 @@ function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHis
       context.fillStyle = gradient;
       context.fill();
 
+      if (reference !== undefined && Number.isFinite(reference)) {
+        const y = priceY(reference);
+        context.save();
+        context.strokeStyle = styles.getPropertyValue("--chart-label").trim();
+        context.globalAlpha = 0.65;
+        context.setLineDash([3, 4]);
+        context.beginPath();
+        context.moveTo(left, y);
+        context.lineTo(right, y);
+        context.stroke();
+        context.restore();
+        context.fillStyle = styles.getPropertyValue("--chart-label").trim();
+        const label = "Prev. close " + number(reference);
+        context.fillText(label, Math.max(left, right - context.measureText(label).width - 4), y < top + 16 ? y + 14 : y - 6);
+      }
       context.beginPath();
       coordinates.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
       context.strokeStyle = color;
-      context.lineWidth = 2;
+      context.lineWidth = 1.25;
       context.lineJoin = "round";
+      context.lineCap = "round";
       context.stroke();
       const latest = coordinates.at(-1)!;
       context.beginPath();
-      context.arc(latest.x, latest.y, 3.5, 0, Math.PI * 2);
+      context.arc(latest.x, latest.y, 2.5, 0, Math.PI * 2);
       context.fillStyle = color;
       context.fill();
     };
@@ -146,7 +178,7 @@ function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHis
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [points, positive, theme]);
+  }, [points, positive, theme, reference]);
 
   if (points.length < 2) {
     return <div className="market-chart chart-recording" role="status">
@@ -158,7 +190,7 @@ function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHis
     const canvas = canvasRef.current;
     if (!canvas) return;
     const bounds = canvas.getBoundingClientRect();
-    const progress = Math.max(0, Math.min(1, (clientX - bounds.left) / Math.max(1, bounds.width - 62)));
+    const progress = Math.max(0, Math.min(1, (clientX - bounds.left - 2) / Math.max(1, bounds.width - 74)));
     const targetTime = Date.parse(points[0].time) + progress * (Date.parse(points.at(-1)!.time) - Date.parse(points[0].time));
     const nearest = points.reduce((best, point, index) => Math.abs(Date.parse(point.time) - targetTime) < Math.abs(Date.parse(points[best].time) - targetTime) ? index : best, 0);
     setHoverIndex(nearest);
@@ -179,7 +211,7 @@ function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHis
       <canvas
         ref={canvasRef}
         className="market-chart"
-        aria-label={hovered ? `Recorded value ${number(hovered.value)} ${unit} at ${easternDate(hovered.time)} ${easternTime(hovered.time)} ${easternZone(hovered.time)}` : "Recorded history chart in " + unit + ". Use the pointer or arrow keys to inspect observations."}
+        aria-label={hovered ? `Recorded value ${number(hovered.value)} ${unit} at ${easternDate(hovered.time)} ${easternTime(hovered.time)} ${easternZone(hovered.time)}` : "Recorded history chart in " + unit + ". " + (reference === undefined ? "" : "Previous close " + number(reference) + ". ") + "Use the pointer or arrow keys to inspect observations."}
         tabIndex={0}
         onPointerMove={(event) => selectNearestPoint(event.clientX)}
         onPointerDown={(event) => selectNearestPoint(event.clientX)}
@@ -187,8 +219,8 @@ function Chart({ points, positive, theme, unit = "Crowns" }: { points: MarketHis
         onBlur={() => setHoverIndex(null)}
       />
       {hovered && <>
-        <span className="chart-crosshair" style={{ left: `calc((100% - 62px) * ${pointPosition / 100})` }} aria-hidden="true" />
-        <output className="chart-tooltip" style={{ left: `clamp(120px, calc((100% - 62px) * ${pointPosition / 100}), calc(100% - 120px))` }}>
+        <span className="chart-crosshair" style={{ left: `calc(2px + (100% - 74px) * ${pointPosition / 100})` }} aria-hidden="true" />
+        <output className="chart-tooltip" style={{ left: `clamp(120px, calc(2px + (100% - 74px) * ${pointPosition / 100}), calc(100% - 120px))` }}>
           <span>{easternDate(hovered.time)} · {easternTime(hovered.time)} {easternZone(hovered.time)}</span>
           <strong>{number(hovered.value)} {unit}</strong>
         </output>
@@ -359,7 +391,7 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
     const loadHistory = async () => {
       setHistoryLoading(true);
       try {
-        const response = await fetch(`/api/v1/issuers/${encodeURIComponent(selected.ticker)}?period=${historyRange}&historyPoints=120`, {
+        const response = await fetch(`/api/v1/issuers/${encodeURIComponent(selected.ticker)}?period=${historyRange}&historyPoints=576`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -572,7 +604,7 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
               <div className="overview-heading"><span className="market-code">RXC</span><h1 id="market-heading">Royal Exchange Composite</h1></div>
               <div className="index-line"><strong className="index-value">{number(snapshot.composite)}</strong><div className="index-movement"><span className={snapshot.compositeChange >= 0 ? "positive" : "negative"}>{signed(snapshot.compositeChange)} <Move value={snapshot.compositeChangePercent} /></span><small>Session movement</small></div></div>
               <div className="history-controls"><div className="history-range" role="group" aria-label="Composite recorded history range">{HISTORY_RANGES.map((range) => <button type="button" key={range.value} className={compositeRange === range.value ? "selected" : ""} aria-pressed={compositeRange === range.value} onClick={() => setCompositeRange(range.value)}>{range.label}</button>)}</div><span className="history-status" aria-live="polite">{compositeLoading ? "Loading history…" : periodChange === null ? "" : periodLabel + " " + signed(periodChange) + " points"}</span></div>
-              <Chart unit="index points" points={compositePoints} positive={(periodChange ?? snapshot.compositeChange) >= 0} theme={theme} />
+              <Chart unit="index points" points={compositePoints} positive={(periodChange ?? snapshot.compositeChange) >= 0} theme={theme} reference={compositeRange === "24h" ? Number((snapshot.composite - snapshot.compositeChange).toFixed(2)) : undefined} />
               <div className="chart-labels"><span>{compositePoints.length ? easternDate(compositePoints[0].time) : ""}</span><span>{compositePoints.length ? "Last clearing " + easternTime(compositePoints.at(-1)!.time) + " " + easternZone(compositePoints.at(-1)!.time) : "As of " + asOf}</span></div>
             </div>
             <aside className="market-summary" aria-label="Market statistics">
@@ -617,7 +649,7 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
           <section className="issuer-detail" aria-labelledby="issuer-heading">
             <div className="focus-heading"><div><span className="eyebrow">{selected.ticker + " · " + selected.sector}</span><h1 id="issuer-heading">{selected.name}</h1><p>{selected.influence}</p></div><div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><div className="focus-change"><span className={selected.change >= 0 ? "positive" : "negative"}>{signed(selected.change)}</span><Move value={selected.changePercent} /><small>session</small></div></div></div>
             <div className="issuer-actions"><button className="action-button" onClick={() => openCharter(selected.ticker)}>Company Charter</button><button className="action-button secondary" aria-pressed={ledgerTickers.includes(selected.ticker)} onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from Ledger" : "Add to Ledger"}</button><span>{"As of " + asOf}</span></div>
-            <div className="issuer-grid"><div className="issuer-chart"><div className="history-controls"><div className="history-range" role="group" aria-label="Recorded history range">{HISTORY_RANGES.map((range) => <button type="button" key={range.value} className={historyRange === range.value ? "selected" : ""} aria-pressed={historyRange === range.value} onClick={() => setHistoryRange(range.value)}>{range.label}</button>)}</div><div className="history-status" aria-live="polite">{historyLoading ? "Loading " + historyLabel + " history…" : chartChangeCrowns === null || chartChangePercent === null ? historyLabel + " performance unavailable" : historyLabel + " " + signed(chartChangeCrowns) + " (" + signed(chartChangePercent, "%") + ")"}</div></div><Chart points={chartHistory} positive={chartPositive} theme={theme} /><div className="chart-labels"><span>{chartHistory.length ? easternDate(chartHistory[0].time) : "Awaiting observation"}</span><span>{"As of " + asOf}</span></div><p className="history-disclosure">Recorded auctions only.{snapshot.recordedFrom ? " History begins " + easternDate(snapshot.recordedFrom) + "." : ""}</p></div>
+            <div className="issuer-grid"><div className="issuer-chart"><div className="history-controls"><div className="history-range" role="group" aria-label="Recorded history range">{HISTORY_RANGES.map((range) => <button type="button" key={range.value} className={historyRange === range.value ? "selected" : ""} aria-pressed={historyRange === range.value} onClick={() => setHistoryRange(range.value)}>{range.label}</button>)}</div><div className="history-status" aria-live="polite">{historyLoading ? "Loading " + historyLabel + " history…" : chartChangeCrowns === null || chartChangePercent === null ? historyLabel + " performance unavailable" : historyLabel + " " + signed(chartChangeCrowns) + " (" + signed(chartChangePercent, "%") + ")"}</div></div><Chart points={chartHistory} positive={chartPositive} theme={theme} reference={historyRange === "24h" ? selected.previousClose : undefined} /><div className="chart-labels"><span>{chartHistory.length ? easternDate(chartHistory[0].time) : "Awaiting observation"}</span><span>{"As of " + asOf}</span></div><p className="history-disclosure">Recorded auctions only.{snapshot.recordedFrom ? " History begins " + easternDate(snapshot.recordedFrom) + "." : ""}</p></div>
               <dl className="instrument-stats"><div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div><div><dt>Open</dt><dd>{number(selected.open)}</dd></div><div><dt>High / low</dt><dd>{number(selected.high) + " / " + number(selected.low)}</dd></div><div><dt>Bid / ask</dt><dd>{number(selected.bid) + " / " + number(selected.ask)}</dd></div><div><dt>Session volume</dt><dd>{number(selected.volume, 0)}</dd></div><div><dt>Last clearing trades</dt><dd>{number(selected.trades, 0)}</dd></div></dl>
             </div>
           </section>
@@ -626,9 +658,9 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
 
         {view === "data" && <>
           <div className="page-title"><span className="eyebrow">Public record · Methodology</span><h1>Market Data &amp; Methodology</h1><p>The Royal Exchange is a fictional Minecraft financial institution. Its market runs continuously; all prices and activity are simulated.</p></div>
-          <div className="data-layout"><div className="methodology"><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. A shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, momentum and market notices influence the participants. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>Longer ranges sample actual recorded observations. Gaps remain gaps in the record; the plotted line connects observations and does not claim trades between them.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
+          <div className="data-layout"><div className="methodology"><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. A shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, persistent order flow and market notices influence the participants. Most price changes are small, with quiet and turbulent periods and occasional larger moves. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>Longer ranges sample actual recorded observations. Gaps remain gaps in the record; the plotted line connects observations and does not claim trades between them.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
           <aside className="data-register"><section><h2 className="eyebrow">Publication status</h2><dl className="data-facts"><div><dt>Data</dt><dd>{snapshot.historyMode === "recorded-ledger" ? "Recorded clearing prices" : "Indicative quotes"}</dd></div><div><dt>As of</dt><dd>{easternDate(snapshot.asOf) + " · " + asOf}</dd></div><div><dt>Next clearing</dt><dd>{countdown}</dd></div><div><dt>Recorded since</dt><dd>{snapshot.recordedFrom ? easternDate(snapshot.recordedFrom) : "Not yet available"}</dd></div><div><dt>Recorded clearings</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div><div><dt>Model</dt><dd>{snapshot.modelVersion}</dd></div></dl></section>
-          <section><h2>Public API</h2><p>The same market record, available as JSON.</p><ul className="api-links"><li><a href="/api/market">Full market snapshot <code>/api/market</code></a></li><li><a href="/api/v1/overview">Market overview <code>/api/v1/overview</code></a></li><li><a href="/api/composite-history?period=24h">Recorded RXC history <code>/api/composite-history</code></a></li><li><a href="/openapi.json">API / OpenAPI schema <code>/openapi.json</code></a></li></ul><p className="technical-note">Composite history accepts period=24h, 7d, 30d or all. At most 120 recorded points are returned. The read-only MCP endpoint is <code>/mcp</code>.</p></section>
+          <section><h2>Public API</h2><p>The same market record, available as JSON.</p><ul className="api-links"><li><a href="/api/market">Full market snapshot <code>/api/market</code></a></li><li><a href="/api/v1/overview">Market overview <code>/api/v1/overview</code></a></li><li><a href="/api/composite-history?period=24h">Recorded RXC history <code>/api/composite-history</code></a></li><li><a href="/openapi.json">API / OpenAPI schema <code>/openapi.json</code></a></li></ul><p className="technical-note">Composite history accepts period=24h, 7d, 30d or all. Up to 576 recorded points are returned; the daily chart retains every five-minute clearing. The read-only MCP endpoint is <code>/mcp</code>.</p></section>
           <section><h2>Institutional references</h2><p>Guild names and trade streets draw on London’s mercantile history.</p><ul className="reference-links"><li><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City of London livery companies</a></li><li><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Company of Merchant Staplers</a></li></ul></section></aside></div>
         </>}
       </main>

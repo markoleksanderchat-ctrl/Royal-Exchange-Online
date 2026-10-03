@@ -25,6 +25,8 @@ test("server-renders the finished Royal Exchange", async () => {
   const html = await response.text();
   assert.match(html, /<title>Royal Exchange — Crown Market Data<\/title>/i);
   assert.match(html, /Royal Exchange/);
+  assert.match(html, /\/assets\/_vinext_fonts\/geist-/);
+  assert.doesNotMatch(html, /(?:file:\/\/\/|[A-Z]:[\/\\])[^"<>]*\.vinext[\/\\]fonts/i);
   assert.match(html, /The Crown Market at Guildhall/);
   assert.match(html, /Royal Exchange Composite/);
   assert.match(html, /Crown market overview/);
@@ -78,7 +80,7 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(market.status, "OPEN");
   assert.equal(market.mode, "autonomous-wall-clock");
   assert.equal(market.simulation, true);
-  assert.equal(market.modelVersion, "royal-exchange-clearing-v3");
+  assert.equal(market.modelVersion, "royal-exchange-clearing-v4");
   assert.equal(market.modelStartedAt, null);
   assert.ok(Array.isArray(market.events));
   assert.equal(typeof market.event.id, "string");
@@ -116,7 +118,7 @@ test("publishes a compact read-only assistant API", async () => {
   assert.equal(overview.listedIssuers, 38);
   assert.equal(overview.matches.length, 0);
   assert.equal(overview.meta.apiVersion, "1.0");
-  assert.equal(overview.meta.modelVersion, "royal-exchange-clearing-v3");
+  assert.equal(overview.meta.modelVersion, "royal-exchange-clearing-v4");
   assert.equal(overview.meta.degraded, true);
   assert.ok(JSON.stringify(overview).length < 5_000);
 

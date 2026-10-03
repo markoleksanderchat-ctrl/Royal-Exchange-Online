@@ -103,6 +103,10 @@ test('ALL history samples real observations with bounded indexed seeks and corre
   assert.ok(plan.filter(row => /SEARCH issuer_ticks/.test(row.detail)).length >= 2);
   assert.deepEqual(await getRecordedIssuerHistory(db, 'STPL', null, 1), points.slice(-1));
   assert.deepEqual(await getRecordedIssuerHistory(db, 'MISSING', null), []);
+  const dense = await getRecordedIssuerHistory(db, 'STPL', null, 576);
+  assert.equal(dense.length, 576);
+  assert.equal(dense[0].value, 1);
+  assert.equal(dense.at(-1).value, 100_000);
   db.sqlite.close();
 });
 

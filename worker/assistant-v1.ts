@@ -63,7 +63,7 @@ export async function handleAssistantV1(request: Request, env: MarketDataEnv) {
         env,
         required(decodeURIComponent(relativePath.slice("issuers/".length)), "identifier"),
         parsePeriod(url.searchParams.get("period")),
-        boundedInteger(url.searchParams.get("historyPoints"), 48, 1, 120),
+        boundedInteger(url.searchParams.get("historyPoints"), 48, 1, 576),
         requestId,
       );
     } else if (relativePath === "compare") {
