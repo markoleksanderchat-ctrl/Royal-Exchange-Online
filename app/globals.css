@@ -101,6 +101,9 @@ small { font-size: 12px; }
 .utility-inner time { margin-left: auto; white-space: nowrap; }
 .utility-countdown b { padding-left: 4px; font-weight: 500; }
 .utility-data { color: #d8e4d8; }
+.session-strip { max-width: var(--page-width); margin: auto; padding: 8px var(--page-gutter); display: flex; flex-wrap: wrap; align-items: center; gap: 5px 20px; color: var(--ink-soft); font-size: 12px; border-bottom: 1px solid var(--line); }
+.session-strip progress { width: 100px; height: 3px; accent-color: var(--crown); }
+.session-strip [role="status"] { color: var(--heading); }
 .masthead { max-width: var(--page-width); margin: auto; min-height: var(--masthead-height); padding: 20px var(--page-gutter); display: flex; align-items: center; gap: 32px; }
 .brand { display: flex; align-items: center; gap: 14px; text-decoration: none; flex-shrink: 0; }
 .brand-mark { display: grid; place-items: center; width: 42px; height: 49px; border: 1px solid var(--brass); border-radius: 1px 1px 15px 15px; color: var(--heading); font: 500 21px var(--font-serif); letter-spacing: -.08em; }

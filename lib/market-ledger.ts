@@ -1,4 +1,6 @@
 import { anomalySchemaStatements, resolveMarketAnomalies } from "./anomalies.ts";
+import { readMarketEra, scheduledSchemaStatements, type MarketEra } from "./market-era.ts";
+import { exchangeCalendar, sessionFor } from "./market-calendar.ts";
 import {
   buildMarketSnapshot,
   COMPANIES,
@@ -18,7 +20,6 @@ import {
   type MarketSnapshot,
 } from "./market.ts";
 
-const DAY_MINUTES = 24 * 60;
 const HISTORY_SAMPLE_MINUTES = 5;
 
 export const marketSchemaStatements = [
@@ -97,6 +98,7 @@ export const marketSchemaStatements = [
   )`,
   "CREATE INDEX IF NOT EXISTS market_trade_ticks_ticker_tick_idx ON market_trade_ticks (ticker, tick)",
   ...anomalySchemaStatements,
+  ...scheduledSchemaStatements,
 ] as const;
 
 type IssuerRow = {
@@ -144,6 +146,7 @@ type TradeRow = {
   session_low: number;
   session_volume: number;
   previous_close: number;
+  session_day: string;
 };
 
 type SummaryRow = { ticker: string; high: number; low: number };
@@ -183,6 +186,13 @@ export async function ensureMarketSchema(db: D1Database) {
 
 export async function recordMarketTick(db: D1Database, at = new Date()) {
   const tick = marketTickAt(at);
+  const era = await readMarketEra(db);
+  if (!era) throw new Error("The backed-up market era has not been activated");
+  if (!exchangeCalendar(at).open) {
+    const latest = await db.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").first<{ tick: number }>();
+    if (!latest) throw new Error("Established market data is missing; recovery is required");
+    return latest.tick;
+  }
   const existing = await db.prepare("SELECT tick FROM market_ticks WHERE tick = ?").bind(tick).first<{ tick: number }>();
   if (existing) return existing.tick;
 
@@ -209,7 +219,7 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
       (tick, observed_at, composite, total_volume, model_version, event_json)
       VALUES (?, ?, ?, ?, ?, ?)`)
       .bind(tick, snapshot.asOf, snapshot.composite, snapshot.totalVolume, MARKET_MODEL_VERSION,
-        JSON.stringify({ event: snapshot.event, events: snapshot.events })),
+        JSON.stringify({ event: snapshot.event, events: snapshot.events, clearingSession: exchangeCalendar(at).session })),
   ];
 
   for (const result of results) {
@@ -268,6 +278,11 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
     // winning tick's state. The primary key is the cross-isolate arbiter.
     await db.batch(statements);
   } catch (error) {
+    if (error instanceof Error && error.message.includes("Market session closed")) {
+      const latest = await db.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").first<{tick:number}>();
+      if (!latest) throw error;
+      return latest.tick;
+    }
     if (!(error instanceof Error) || !error.message.includes("UNIQUE constraint failed: market_ticks.tick")) throw error;
     const winner = await db.prepare("SELECT tick FROM market_ticks WHERE tick = ?").bind(tick).first();
     if (!winner) throw error;
@@ -275,13 +290,46 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
   return tick;
 }
 
+function calendarSnapshot(snapshot: MarketSnapshot, at: Date, era: MarketEra | null): MarketSnapshot {
+  const calendar = exchangeCalendar(at);
+  return { ...snapshot, status: era && calendar.open ? "OPEN" : "CLOSED",
+    nextUpdateAt: new Date(calendar.nextClearingAt).toISOString(),
+    session: { ...calendar, serverTime: at.toISOString(), era: era?.version ?? null, startedAt: era?.started_at ?? null,
+      ready: era !== null, observedDay: snapshot.session?.observedDay ?? null } };
+}
+
+async function finalizeSession(db: D1Database, snapshot: MarketSnapshot, at: Date) {
+  const day = snapshot.session?.observedDay;
+  if (!day) return;
+  const session = sessionFor(day);
+  if (!session || at.getTime() < session.closesAt) return;
+  const finalized = { ...snapshot, status: "CLOSED", nextUpdateAt: new Date(exchangeCalendar(session.closesAt).nextOpeningAt).toISOString(),
+    session: { ...snapshot.session, ...exchangeCalendar(session.closesAt), progress: 1, serverTime: new Date(session.closesAt).toISOString() } };
+  await db.prepare(`INSERT OR IGNORE INTO market_sessions(day,opens_at,closes_at,last_tick,snapshot_json)
+    VALUES (?,?,?,?,?)`).bind(day,new Date(session.opensAt).toISOString(),new Date(session.closesAt).toISOString(),
+      snapshot.tick,JSON.stringify(finalized)).run();
+}
+
 export async function getRecordedMarketSnapshot(db: D1Database, at = new Date()): Promise<MarketSnapshot> {
   const cachedRow = await db.prepare("SELECT tick, snapshot_json FROM market_snapshot WHERE id = 1").first<SnapshotRow>();
   const cached = cachedRow ? JSON.parse(cachedRow.snapshot_json) as MarketSnapshot : null;
-  if (cached && cached.tick >= marketTickAt(at)) return cached;
+  const era = await readMarketEra(db);
+  if (!era) {
+    if (!cached) throw new Error("The backed-up market era has not been activated");
+    return calendarSnapshot(cached, at, null);
+  }
+  const latest = await db.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").first<{tick: number}>();
+  if (!latest) throw new Error("Established market data is missing; recovery is required");
+  const previous = cached?.tick === latest.tick ? cached : await readStoredSnapshot(db,at,latest.tick,null,era);
+  await finalizeSession(db,previous,at);
   const currentTick = await recordMarketTick(db, at);
-  const cutoffTick = currentTick - DAY_MINUTES;
-  const dayStartTick = marketSessionStartTick(at);
+  if (currentTick === previous.tick) return calendarSnapshot(previous,at,era);
+  return readStoredSnapshot(db,at,currentTick,previous,era);
+}
+
+async function readStoredSnapshot(db: D1Database, at: Date, currentTick: number, cached: MarketSnapshot | null, era: MarketEra): Promise<MarketSnapshot> {
+  const dayStartTick = marketSessionStartTick(new Date(currentTick * MINUTE));
+  const cutoffTick = Math.min(dayStartTick,currentTick);
 
   const [currentMarket, currentIssuers, currentTrades, history, ledger, modelMeta, previousMarket] = await Promise.all([
     db.prepare("SELECT tick, observed_at, composite, total_volume, model_version, event_json FROM market_ticks WHERE tick = ?")
@@ -289,7 +337,7 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     db.prepare(`SELECT tick, ticker, name, sector, influence, observed_at, price, volume
       FROM issuer_ticks WHERE tick = ? ORDER BY ticker`).bind(currentTick).all<IssuerRow>(),
     db.prepare(`SELECT ticker, bid, ask, trade_count, fair_value, session_open, session_high,
-      session_low, session_volume, previous_close FROM market_trade_ticks WHERE tick = ? ORDER BY ticker`)
+      session_low, session_volume, previous_close, session_day FROM market_trade_ticks WHERE tick = ? ORDER BY ticker`)
       .bind(currentTick).all<TradeRow>(),
     cached ? Promise.resolve({ results: [] as IssuerRow[] }) : db.prepare(`SELECT tick, ticker, name, sector, influence, observed_at, price, volume
       FROM issuer_ticks
@@ -385,6 +433,8 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
     recordedObservations: ledger?.observations ?? 1,
     currency: "Crown",
     status: "OPEN",
+    session: { ...exchangeCalendar(at), serverTime: at.toISOString(), era: era.version, startedAt: era.started_at,
+      ready: true, observedDay: currentTrades.results[0]?.session_day ?? null },
     asOf: currentMarket.observed_at,
     tick: currentMarket.tick,
     nextUpdateAt: new Date((currentMarket.tick + MARKET_SESSION_MINUTES) * MINUTE).toISOString(),
@@ -402,7 +452,7 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
   await db.prepare(`INSERT INTO market_snapshot (id, tick, snapshot_json) VALUES (1, ?, ?)
     ON CONFLICT(id) DO UPDATE SET tick = excluded.tick, snapshot_json = excluded.snapshot_json
     WHERE excluded.tick > market_snapshot.tick`).bind(currentTick, JSON.stringify(snapshot)).run();
-  return snapshot;
+  return calendarSnapshot(snapshot,at,era);
 }
 
 export async function getRecordedIssuerHistory(
@@ -411,7 +461,10 @@ export async function getRecordedIssuerHistory(
   periodMinutes: number | null,
   maximumPoints = 120,
 ): Promise<MarketHistoryPoint[]> {
-  const cutoffTick = periodMinutes === null ? 0 : Math.floor(Date.now() / MINUTE) - periodMinutes;
+  const latest = await db.prepare("SELECT tick FROM issuer_ticks WHERE ticker = ? ORDER BY tick DESC LIMIT 1").bind(ticker).first<{tick: number}>();
+  if (!latest) return [];
+  const cutoffTick = periodMinutes === null ? 0 : periodMinutes === 1440
+    ? marketSessionStartTick(new Date(latest.tick * MINUTE)) : latest.tick - periodMinutes;
   const limit = Math.max(1, Math.min(MAX_HISTORY_POINTS, Math.floor(maximumPoints)));
   const bounds = await db.batch<{ tick: number }>([
     db.prepare("SELECT tick FROM issuer_ticks WHERE ticker = ? AND tick >= ? ORDER BY tick ASC LIMIT 1").bind(ticker, cutoffTick),

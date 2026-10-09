@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createRandomAnomaly } from "../lib/anomalies.ts";
-import { anomalyImpactAt, getMarketSnapshot } from "../lib/market.ts";
+import { anomalyImpactAt, getMarketSnapshot, COMPANIES, initialIssuerState, marketTickAt, runClearingSession } from "../lib/market.ts";
 
 function sequence(...values) {
   let index = 0;
@@ -34,7 +34,13 @@ test("anomaly phases rise, peak and recover without affecting unrelated issuers"
   assert.equal(snapshot.events.length, 1);
   assert.equal(snapshot.event.id, anomaly.id);
   assert.equal(snapshot.event.severity, anomaly.severity);
-  const affected = snapshot.companies.find((company) => anomaly.affectedTickers.includes(company.ticker));
-  const unaffected = snapshot.companies.find((company) => !anomaly.affectedTickers.includes(company.ticker));
-  assert.ok(affected && Math.abs(affected.changePercent) > Math.abs(unaffected?.changePercent ?? 0));
+  const tick = marketTickAt(new Date("2026-07-30T15:00:00Z"));
+  const active = {...anomaly, startedAtEpochMillis:(tick-10)*60000,peaksAtEpochMillis:tick*60000,endsAtEpochMillis:(tick+20)*60000};
+  for (const definition of COMPANIES) {
+    const state = initialIssuerState(definition, definition.base, tick-5);
+    const calm = runClearingSession(definition,state,tick);
+    const stressed = runClearingSession(definition,state,tick,[active]);
+    if (!active.affectedTickers.includes(definition.ticker)) assert.deepEqual(stressed,calm);
+    else assert.notEqual(stressed.state.demandIndex,calm.state.demandIndex);
+  }
 });

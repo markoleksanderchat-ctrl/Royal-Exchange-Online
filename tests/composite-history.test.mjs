@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { readCompositeHistory, handleCompositeHistory } from "../worker/composite-history.ts";
+import { exchangeCalendar } from "../lib/market-calendar.ts";
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -43,10 +44,10 @@ test("RXC history returns real observations across gaps with indexed, bounded sa
     assert.ok(points.every((point, i) => !i || Date.parse(point.time) > Date.parse(points[i - 1].time)));
     assert.equal(points.at(-1).time, new Date(now).toISOString());
     if (period === "24h") {
-      assert.ok(Date.parse(points[0].time) >= now - 1440 * 60000);
-      assert.deepEqual(points, [...values].filter(([time]) => Date.parse(time) >= now - 1440 * 60000)
+      const sessionStart = exchangeCalendar(now).session.opensAt;
+      assert.ok(Date.parse(points[0].time) >= sessionStart);
+      assert.deepEqual(points, [...values].filter(([time]) => Date.parse(time) >= sessionStart)
         .map(([time, value]) => ({ time, value })), "daily history retains every actual clearing");
-      assert.ok(points.length > 240, "daily history is denser than the old 120-point cap");
     }
     if (period === "all") assert.equal(points[0].time, new Date((start + 5) * 60000).toISOString());
   }

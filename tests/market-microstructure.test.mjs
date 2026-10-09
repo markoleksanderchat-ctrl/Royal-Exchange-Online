@@ -16,17 +16,21 @@ for (const date of ["2026-04-01T04:00:00Z", "2026-09-22T04:00:00Z"]) {
     const tick = Date.parse(date) / 60_000;
     let state = initialIssuerState(definition, definition.base, tick - 5);
     const returns = [];
-    for (let i = 0; i < 288 * 10; i++) {
+    for (let i = 0; i < 288 * 30; i++) {
       const result = runClearingSession(definition, state, tick + i * 5);
       if (i === 500) {
         assert.deepEqual(runClearingSession(definition, JSON.parse(JSON.stringify(state)), tick + i * 5), result,
           "restoring persisted state must reproduce the same orders, quote, momentum and variance");
       }
-      returns.push((result.company.price - state.lastPrice) / state.lastPrice);
+      // Overnight gaps and closed periods are not intraday tick returns.
+      if (result.state.lastTick !== state.lastTick && result.state.sessionDay === state.sessionDay) {
+        returns.push((result.company.price - state.lastPrice) / state.lastPrice);
+      }
       assert.ok(result.company.price > 0 && result.company.bid < result.company.ask);
       state = result.state;
     }
     const absolute = returns.map(Math.abs);
+    assert.ok(returns.length > 1000, "sample actual trading ticks rather than frozen overnight prices");
     const sorted = [...absolute].sort((a, b) => a - b);
     assert.ok(absolute.filter(value => value < 0.0015).length / absolute.length > 0.85);
     assert.ok(sorted.at(-1) > sorted[Math.floor(sorted.length / 2)] * 6, "rare moves exceed ordinary noise");
@@ -34,7 +38,7 @@ for (const date of ["2026-04-01T04:00:00Z", "2026-09-22T04:00:00Z"]) {
     const persistence = correlation(returns.slice(1), returns.slice(0, -1));
     assert.ok(persistence > 0.15 && persistence < 0.65, "momentum survives briefly without smoothing away tick variation");
     assert.ok(correlation(absolute.slice(1), absolute.slice(0, -1)) > 0.2, "turbulent moves occur in clusters");
-    const windows = Array.from({ length: returns.length / 12 }, (_, i) =>
+    const windows = Array.from({ length: Math.floor(returns.length / 12) }, (_, i) =>
       Math.sqrt(returns.slice(i * 12, i * 12 + 12).reduce((sum, value) => sum + value ** 2, 0) / 12)).sort((a, b) => a - b);
     assert.ok(windows[Math.floor(windows.length * 0.9)] / windows[Math.floor(windows.length * 0.1)] > 2);
     const reversals = returns.slice(1).filter((value, i) => value * returns[i] < 0).length / (returns.length - 1);
@@ -43,10 +47,10 @@ for (const date of ["2026-04-01T04:00:00Z", "2026-09-22T04:00:00Z"]) {
 }
 
 test("RXC equals weighted constituent clearing prices on every observation", () => {
-  const start = Date.parse("2026-10-01T04:00:00Z") / 60_000;
+  const start = Date.parse("2026-10-01T13:30:00Z") / 60_000;
   let states = COMPANIES.map(company => initialIssuerState(company, company.base, start - 5));
   const base = COMPANIES.reduce((sum, company) => sum + company.base * company.weight, 0);
-  for (let i = 0; i < 289; i++) {
+  for (let i = 0; i < 78; i++) {
     const tick = start + i * 5;
     const results = COMPANIES.map((company, index) => runClearingSession(company, states[index], tick));
     states = results.map(result => result.state);

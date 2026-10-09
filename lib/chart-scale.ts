@@ -18,7 +18,7 @@ export function priceAxis(values: number[], reference?: number) {
   return { minimum, maximum, ticks };
 }
 
-/** Labels use the exchange's continuous Eastern-time session, not US stock hours. */
+/** Labels use the recorded exchange session in Eastern Time. */
 export function timeAxis(points: MarketHistoryPoint[], width: number) {
   if (points.length < 2) return [];
   const start = Date.parse(points[0].time);

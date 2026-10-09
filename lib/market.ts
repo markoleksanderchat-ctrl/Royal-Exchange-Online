@@ -1,4 +1,6 @@
-export const MARKET_MODEL_VERSION = "royal-exchange-clearing-v4" as const;
+import { easternDay, exchangeCalendar, type ExchangeCalendar } from "./market-calendar.ts";
+export const MARKET_MODEL_VERSION = "royal-exchange-clearing-v5" as const;
+export type MarketSession = ExchangeCalendar & { serverTime: string; era: number | null; startedAt: string | null; ready: boolean; observedDay?: string | null };
 
 export type MarketHistoryPoint = {
   time: string;
@@ -69,7 +71,8 @@ export type MarketSnapshot = {
   recordedFrom: string | null;
   recordedObservations: number;
   currency: "Crown";
-  status: "OPEN";
+  status: "OPEN" | "CLOSED";
+  session?: MarketSession;
   asOf: string;
   tick: number;
   nextUpdateAt: string;
@@ -155,47 +158,12 @@ type Order = {
 export const MINUTE = 60_000;
 export const MARKET_SESSION_MINUTES = 5;
 export const MAX_HISTORY_POINTS = 576;
-const MARKET_TIME_ZONE = "America/New_York";
-const MARKET_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  timeZone: MARKET_TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-const MARKET_OFFSET_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  timeZone: MARKET_TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hourCycle: "h23",
-});
-
-function dateParts(formatter: Intl.DateTimeFormat, value: Date) {
-  return Object.fromEntries(formatter.formatToParts(value)
-    .filter((part) => part.type !== "literal")
-    .map((part) => [part.type, Number(part.value)]));
-}
-
 export function marketSessionDayAt(value: Date | number) {
-  const parts = dateParts(MARKET_DAY_FORMATTER, value instanceof Date ? value : new Date(value));
-  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
-}
-
-function easternOffsetAt(epochMillis: number) {
-  const parts = dateParts(MARKET_OFFSET_FORMATTER, new Date(epochMillis));
-  const representedAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-  return representedAsUtc - Math.floor(epochMillis / 1_000) * 1_000;
+  return easternDay(value);
 }
 
 export function marketSessionStartTick(value: Date) {
-  const [year, month, day] = marketSessionDayAt(value).split("-").map(Number);
-  const localMidnightAsUtc = Date.UTC(year, month - 1, day);
-  const firstEstimate = localMidnightAsUtc - easternOffsetAt(localMidnightAsUtc);
-  const corrected = localMidnightAsUtc - easternOffsetAt(firstEstimate);
-  return Math.floor(corrected / MINUTE);
+  return Math.floor(exchangeCalendar(value).session.opensAt / MINUTE);
 }
 
 export const COMPANIES: CompanyDefinition[] = [
@@ -330,7 +298,7 @@ function marketEvent(anomaly: ActiveMarketAnomaly, time: number): MarketEvent {
 export const QUIET_EVENT: MarketEvent = {
   id: "none",
   title: "No exceptional market notices",
-  description: "Trading continues under ordinary conditions; the wardens report no active anomaly.",
+  description: "The wardens report no active market anomaly.",
   tone: "neutral",
   severity: "routine",
   phase: "quiet",
@@ -427,8 +395,29 @@ export function runClearingSession(
   tick: number,
   anomalies: ActiveMarketAnomaly[] = [],
 ): ClearingResult {
+  const calendar = exchangeCalendar(tick * MINUTE);
+  if (!calendar.open || tick <= previous.lastTick) {
+    const company = frozenCompany(definition, previous);
+    return { state: previous, company, trade: { ticker: definition.ticker, tick: previous.lastTick,
+      observedAt: new Date(previous.lastTick * MINUTE).toISOString(), price: previous.lastPrice,
+      bid: company.bid, ask: company.ask, quantity: 0, notional: 0, tradeCount: 0,
+      buyerMix: {}, sellerMix: {}, fairValue: previous.fairValue, earningsIndex: previous.earningsIndex,
+      demandIndex: previous.demandIndex, supplyIndex: previous.supplyIndex } };
+  }
+  const priorClose = previous.lastPrice;
+  const opening = previous.sessionDay !== calendar.session.day;
+  if (opening) {
+    const closedDays = Math.max(1, Math.min(5, (calendar.session.opensAt - previous.lastTick * MINUTE) / 86_400_000));
+    const openingTick = calendar.session.opensAt / MINUTE;
+    const news = normalUnit(openingTick, "RXC", 91) * 0.45
+      + normalUnit(openingTick, definition.sector, 92) * 0.2 + normalUnit(openingTick, definition.ticker, 93) * 0.55;
+    const gap = previous.sessionDay === "" ? 0 : clamp(news * previous.volatility * 0.08 * Math.sqrt(closedDays)
+      + clamp(previous.earningsIndex - previous.bookValueIndex, -0.3, 0.3) * 0.003, -0.032, 0.032);
+    previous = { ...previous, lastPrice: roundPrice(previous.lastPrice * (1 + gap)), momentum: 0 };
+  }
   const observedAt = new Date(tick * MINUTE).toISOString();
-  const elapsed = clamp(Math.round((tick - previous.lastTick) / MARKET_SESSION_MINUTES) || 1, 1, 288);
+  // One actual auction: downtime never multiplies unobserved orders or volume.
+  const elapsed = 1;
   const time = tick * MINUTE;
   const anomalySignal = anomalies
     .filter((anomaly) => anomaly.affectedTickers.includes(definition.ticker))
@@ -483,7 +472,8 @@ export function runClearingSession(
     const buy = buys[buyIndex];
     const sell = sells[sellIndex];
     const matched = Math.min(buy.quantity, sell.quantity);
-    const execution = roundPrice(clamp((buy.limit + sell.limit) / 2, previous.lastPrice * 0.94, previous.lastPrice * 1.06));
+    const execution = roundPrice(clamp((buy.limit + sell.limit) / 2,
+      opening ? priorClose * 0.965 : previous.lastPrice * 0.94, opening ? priorClose * 1.035 : previous.lastPrice * 1.06));
     quantity += matched;
     notional += matched * execution;
     tradeCount += 1;
@@ -515,7 +505,7 @@ export function runClearingSession(
   }
   const day = marketSessionDayAt(tick * MINUTE);
   const newSession = previous.sessionDay !== day;
-  const previousClose = newSession ? previous.lastPrice : previous.previousClose;
+  const previousClose = newSession ? priorClose : previous.previousClose;
   const sessionOpen = newSession ? price : previous.sessionOpen;
   const sessionHigh = newSession ? executionHigh : Math.max(previous.sessionHigh, executionHigh);
   const sessionLow = newSession ? executionLow : Math.min(previous.sessionLow, executionLow);
@@ -628,10 +618,12 @@ export function buildMarketSnapshot(
     recordedFrom,
     recordedObservations,
     currency: "Crown",
-    status: "OPEN",
+    status: exchangeCalendar(at).open ? "OPEN" : "CLOSED",
+    session: { ...exchangeCalendar(at), serverTime: at.toISOString(), era: historyMode === "recorded-ledger" ? 1 : null,
+      startedAt: modelStartedAt, ready: historyMode === "recorded-ledger" },
     asOf: new Date(tick * MINUTE).toISOString(),
     tick,
-    nextUpdateAt: new Date((tick + MARKET_SESSION_MINUTES) * MINUTE).toISOString(),
+    nextUpdateAt: new Date(exchangeCalendar(at).nextClearingAt).toISOString(),
     composite,
     compositeChange,
     compositeChangePercent,
@@ -649,7 +641,18 @@ export function getMarketSnapshot(at = new Date(), anomalies: ActiveMarketAnomal
   const tick = marketTickAt(at);
   const companies = COMPANIES.map((definition) => {
     const state = initialIssuerState(definition, definition.base, tick - MARKET_SESSION_MINUTES);
-    return runClearingSession(definition, state, tick, anomalies).company;
+    return frozenCompany(definition, { ...state, sessionDay: "" });
   });
-  return buildMarketSnapshot(at, companies, anomalies);
+  const snapshot = buildMarketSnapshot(at, companies, anomalies);
+  return { ...snapshot, status: "CLOSED" };
+}
+
+export function frozenCompany(definition: CompanyDefinition, state: IssuerMarketState): ListedCompany {
+  const spread = Math.max(0.01, roundPrice(state.lastPrice * 0.002));
+  const change = round2(state.lastPrice - state.previousClose);
+  return { ticker: definition.ticker, name: definition.name, sector: definition.sector, influence: definition.influence,
+    price: state.lastPrice, bid: roundPrice(state.lastPrice - spread / 2), ask: roundPrice(state.lastPrice + spread / 2),
+    spread, fairValue: state.fairValue, trades: 0, open: state.sessionOpen, previousClose: state.previousClose,
+    change, changePercent: Number((change / state.previousClose * 100).toFixed(2)), volume: state.sessionVolume,
+    high: state.sessionHigh, low: state.sessionLow, history: [{ time: new Date(state.lastTick * MINUTE).toISOString(), value: state.lastPrice }] };
 }

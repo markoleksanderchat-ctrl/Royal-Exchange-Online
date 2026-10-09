@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { getMarketSnapshot } from "../lib/market";
 import { getRecordedMarketSnapshot } from "../lib/market-ledger";
+import { activateMarketEraFromDeployment } from "../lib/market-era";
 import { handleAssistantApi } from "./assistant-api";
 import { handleAssistantV1 } from "./assistant-v1";
 import { handleRoyalExchangeMcp } from "./mcp";
@@ -12,6 +13,7 @@ import { handleCompositeHistory } from "./composite-history";
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  MARKET_RESET_BACKUP_SHA256?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -30,6 +32,9 @@ interface Env {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if (env.DB && env.MARKET_RESET_BACKUP_SHA256) {
+      await activateMarketEraFromDeployment(env.DB, new Date(), env.MARKET_RESET_BACKUP_SHA256);
+    }
 
     if (url.pathname === "/api/composite-history") return handleCompositeHistory(request, env);
 
@@ -74,7 +79,10 @@ const worker = {
     return handler.fetch(request, env, ctx);
   },
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(getRecordedMarketSnapshot(env.DB, new Date(controller.scheduledTime)));
+    ctx.waitUntil((async () => {
+      await activateMarketEraFromDeployment(env.DB, new Date(), env.MARKET_RESET_BACKUP_SHA256);
+      await getRecordedMarketSnapshot(env.DB, new Date(controller.scheduledTime));
+    })());
   },
 };
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import { MARKET_MODEL_VERSION } from "../lib/market.ts";
 
 async function worker() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -36,7 +37,7 @@ test("server-renders the finished Royal Exchange", async () => {
   assert.match(html, /href="\/my-ledger"/);
   assert.match(html, /href="\/data"/);
   assert.match(html, /Market Wardens/);
-  assert.match(html, /Five-minute clearing/);
+  assert.match(html, /NYSE calendar/);
   assert.match(html, /Dark mode/);
   assert.match(html, /Daily Official List/);
   assert.match(html, /Merchant(?:’|&rsquo;)s Price Book/);
@@ -77,10 +78,10 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(response.headers.get("x-royal-exchange-history"), "unavailable");
   const market = await response.json();
   assert.equal(market.exchange, "Royal Exchange");
-  assert.equal(market.status, "OPEN");
+  assert.equal(market.status, "CLOSED");
   assert.equal(market.mode, "autonomous-wall-clock");
   assert.equal(market.simulation, true);
-  assert.equal(market.modelVersion, "royal-exchange-clearing-v4");
+  assert.equal(market.modelVersion, MARKET_MODEL_VERSION);
   assert.equal(market.modelStartedAt, null);
   assert.ok(Array.isArray(market.events));
   assert.equal(typeof market.event.id, "string");
@@ -89,7 +90,7 @@ test("publishes a complete autonomous market snapshot", async () => {
   assert.equal(market.recordedObservations, 0);
   assert.equal(market.companies.length, 38);
   assert.ok(market.composite > 0);
-  assert.ok(market.totalVolume > 0);
+  assert.equal(market.totalVolume, 0);
   assert.ok(Date.parse(market.nextUpdateAt) > Date.parse(market.asOf));
   for (const company of market.companies) {
     assert.match(company.ticker, /^[A-Z]{3,4}$/);
@@ -118,7 +119,7 @@ test("publishes a compact read-only assistant API", async () => {
   assert.equal(overview.listedIssuers, 38);
   assert.equal(overview.matches.length, 0);
   assert.equal(overview.meta.apiVersion, "1.0");
-  assert.equal(overview.meta.modelVersion, "royal-exchange-clearing-v4");
+  assert.equal(overview.meta.modelVersion, MARKET_MODEL_VERSION);
   assert.equal(overview.meta.degraded, true);
   assert.ok(JSON.stringify(overview).length < 5_000);
 

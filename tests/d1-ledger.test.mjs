@@ -2,12 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { ensureMarketSchema, getRecordedMarketSnapshot, getRecordedIssuerHistory, recordMarketTick } from '../lib/market-ledger.ts';
+import { ensureMarketSchema, getRecordedMarketSnapshot as snapshotAt, getRecordedIssuerHistory, recordMarketTick as recordAt } from '../lib/market-ledger.ts';
+import { marketEraActivationStatements } from '../lib/market-era.ts';
+async function initialize(db) { await ensureMarketSchema(db); await db.batch(marketEraActivationStatements(db,start,'a'.repeat(64))); }
+function getRecordedMarketSnapshot(db,at) { db.sqlite.testNow=at.getTime(); return snapshotAt(db,at); }
+function recordMarketTick(db,at) { db.sqlite.testNow=at.getTime(); return recordAt(db,at); }
 
 // Runs the actual production SQL against SQLite, including transactional batch
 // rollback. Query plans catch full-history scans that response tests cannot.
 class SqliteD1 {
-  constructor(sqlite = new DatabaseSync(':memory:')) { this.sqlite = sqlite; this.queries = []; }
+  constructor(sqlite = new DatabaseSync(':memory:')) {
+    this.sqlite = sqlite; this.queries = [];
+    sqlite.testNow=start.getTime(); sqlite.function('unixepoch',{varargs:true},()=>Math.floor(sqlite.testNow/1000));
+  }
   prepare(sql) {
     const sqlite = this.sqlite;
     const log = (query) => this.queries.push(query);
@@ -35,19 +42,19 @@ class SqliteD1 {
   }
 }
 
-const start = new Date('2026-09-03T12:00:00Z');
+const start = new Date('2026-09-03T14:00:00Z');
 const at = (minutes) => new Date(start.getTime() + minutes * 60_000);
 
 test('recording, cached reads and recovery preserve the ledger without rescanning old history', async () => {
   const db = new SqliteD1();
-  await ensureMarketSchema(db);
+  await initialize(db);
   const first = await getRecordedMarketSnapshot(db, start);
   assert.equal(first.recordedObservations, 1);
   assert.equal(first.companies.length, 38);
   assert.ok(first.companies.every(c => c.history.length === 1));
   db.queries = [];
   assert.deepEqual(await getRecordedMarketSnapshot(db, start), first);
-  assert.equal(db.queries.length, 1, 'a warm snapshot is one primary-key read');
+  assert.ok(db.queries.length <= 5, 'warm calendar snapshots use bounded state and primary-key reads');
   assert.match(db.queries[0], /FROM market_snapshot WHERE id = 1/);
 
   db.queries = [];
@@ -72,7 +79,7 @@ test('recording, cached reads and recovery preserve the ledger without rescannin
 
 test('concurrent recorders do not double-count observations or overwrite a committed tick', async () => {
   const db = new SqliteD1();
-  await ensureMarketSchema(db);
+  await initialize(db);
   const peer = new SqliteD1(db.sqlite);
   const [left, right] = await Promise.all([getRecordedMarketSnapshot(db, start), getRecordedMarketSnapshot(peer, start)]);
   assert.deepEqual(left, right);
@@ -110,37 +117,35 @@ test('ALL history samples real observations with bounded indexed seeks and corre
   db.sqlite.close();
 });
 
-test('restart migration removes history, state, notices and snapshots, then starts with one observation', async () => {
+test('missing established data never silently starts another market era', async () => {
   const db = new SqliteD1();
-  await ensureMarketSchema(db);
+  await initialize(db);
   await getRecordedMarketSnapshot(db, start);
   await getRecordedMarketSnapshot(db, at(5));
   db.sqlite.exec(readFileSync(new URL('./fixtures/restart-exchange.sql', import.meta.url), 'utf8'));
   for (const name of ['market_ticks', 'issuer_ticks', 'market_trade_ticks', 'issuer_market_state', 'market_anomalies', 'market_anomaly_state', 'market_snapshot']) {
     assert.equal(db.sqlite.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get().n, 0);
   }
-  const fresh = await getRecordedMarketSnapshot(db, at(10));
-  assert.equal(fresh.recordedObservations, 1);
-  assert.equal(fresh.recordedFrom, at(10).toISOString());
-  assert.ok(fresh.companies.every(c => c.history.length === 1));
+  await assert.rejects(getRecordedMarketSnapshot(db, at(10)),/recovery is required/);
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM market_era').get().n,1);
   const indexes = db.sqlite.prepare("SELECT name FROM sqlite_schema WHERE type='index'").all().map(r => r.name);
   assert.ok(indexes.includes('market_anomalies_ends_at_idx'));
   assert.ok(!indexes.includes('issuer_ticks_observed_at_idx'));
   db.sqlite.close();
 });
 
-test('incremental snapshots retain exactly the trailing day across session rollover', async () => {
+test('incremental snapshots retain the observed trading day across overnight closure', async () => {
   const db = new SqliteD1();
-  await ensureMarketSchema(db);
+  await initialize(db);
   let snapshot;
   for (let tick = 0; tick <= 300; tick++) snapshot = await getRecordedMarketSnapshot(db, at(tick * 5));
-  assert.equal(snapshot.recordedObservations, 301);
+  assert.equal(snapshot.recordedObservations, 91);
   assert.equal(snapshot.recordedFrom, start.toISOString());
-  assert.ok(snapshot.companies.every(c => c.history.length === 289));
-  assert.ok(snapshot.companies.every(c => c.history[0].time === at(60).toISOString()));
+  assert.ok(snapshot.companies.every(c => c.history.length === 19));
+  assert.ok(snapshot.companies.every(c => c.history[0].time === '2026-09-04T13:30:00.000Z'));
   assert.ok(snapshot.companies.every(c => c.history.at(-1).time === snapshot.asOf));
   assert.ok(snapshot.companies.every(c => c.high >= c.price && c.low <= c.price));
-  assert.equal(db.queries.filter(q => /MIN\(observed_at\).*COUNT/.test(q)).length, 1);
+  assert.ok(db.queries.filter(q => /MIN\(observed_at\).*COUNT/.test(q)).length <= 1);
   const baseline = JSON.parse(db.sqlite.prepare('SELECT event_json FROM market_ticks LIMIT 1').get().event_json);
   assert.ok(baseline.event);
   db.sqlite.close();
@@ -148,11 +153,12 @@ test('incremental snapshots retain exactly the trailing day across session rollo
 
 test('performance migration preserves existing records and supports a fresh installation', async () => {
   const fresh = new SqliteD1();
-  for (const file of ['0000_mute_taskmaster.sql', '0001_market_anomalies.sql', '0002_real_market_engine.sql', '0003_bounded_snapshots.sql']) {
+  for (const file of ['0000_mute_taskmaster.sql', '0001_market_anomalies.sql', '0002_real_market_engine.sql', '0003_bounded_snapshots.sql', '0004_scheduled_market.sql']) {
     fresh.sqlite.exec(readFileSync(new URL('../drizzle/' + file, import.meta.url), 'utf8'));
   }
+  await initialize(fresh);
   const before = await getRecordedMarketSnapshot(fresh, start);
-  for (const file of ['0001_market_anomalies.sql', '0002_real_market_engine.sql', '0003_bounded_snapshots.sql']) {
+  for (const file of ['0001_market_anomalies.sql', '0002_real_market_engine.sql', '0003_bounded_snapshots.sql', '0004_scheduled_market.sql']) {
     fresh.sqlite.exec(readFileSync(new URL('../drizzle/' + file, import.meta.url), 'utf8'));
   }
   assert.deepEqual(await getRecordedMarketSnapshot(fresh, start), before);

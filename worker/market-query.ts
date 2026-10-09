@@ -168,6 +168,7 @@ export async function getOverview(env: MarketDataEnv, moverLimit = 5, requestId?
     meta: meta(loaded, requestId),
     exchange: snapshot.exchange,
     status: snapshot.status,
+    session: snapshot.session,
     currency: snapshot.currency,
     composite: snapshot.composite,
     compositeChange: snapshot.compositeChange,

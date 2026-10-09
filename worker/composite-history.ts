@@ -1,11 +1,14 @@
-import { MAX_HISTORY_POINTS, type MarketHistoryPoint } from "../lib/market.ts";
+import { MAX_HISTORY_POINTS, marketSessionStartTick, type MarketHistoryPoint } from "../lib/market.ts";
 
 const PERIOD_MINUTES = { "24h": 1440, "7d": 10080, "30d": 43200, all: null } as const;
 
 /** Reads the existing index ledger. Never clears, records, reconstructs or backfills prices. */
 export async function readCompositeHistory(db: D1Database, period: keyof typeof PERIOD_MINUTES, now = Date.now()): Promise<MarketHistoryPoint[]> {
   const minutes = PERIOD_MINUTES[period];
-  const cutoff = minutes === null ? 0 : Math.floor(now / 60_000) - minutes;
+  const newest = await db.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").all<{tick: number}>();
+  if (!newest.results.length) return [];
+  const anchor = Math.min(Math.floor(now / 60_000),newest.results[0].tick);
+  const cutoff = minutes === null ? 0 : period === "24h" ? marketSessionStartTick(new Date(anchor * 60_000)) : anchor - minutes;
   const bounds = await db.batch<{ tick: number }>([
     db.prepare("SELECT tick FROM market_ticks WHERE tick >= ? ORDER BY tick ASC LIMIT 1").bind(cutoff),
     db.prepare("SELECT tick FROM market_ticks WHERE tick >= ? ORDER BY tick DESC LIMIT 1").bind(cutoff),

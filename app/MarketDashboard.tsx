@@ -37,12 +37,12 @@ function signed(value: number, suffix = "") {
   return `${value >= 0 ? "+" : ""}${number(value)}${suffix}`;
 }
 
-function secondsUntil(value: string) {
-  return Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 1_000));
+function secondsUntil(value: string, now = Date.now()) {
+  return Math.max(0, Math.ceil((new Date(value).getTime() - now) / 1_000));
 }
 
 function snapshotIntervalSeconds(snapshot: MarketSnapshot) {
-  return Math.max(0, Math.ceil((new Date(snapshot.nextUpdateAt).getTime() - new Date(snapshot.asOf).getTime()) / 1_000));
+  return secondsUntil(snapshot.nextUpdateAt, Date.parse(snapshot.session?.serverTime ?? snapshot.asOf));
 }
 
 function normalizedSearch(value: string) {
@@ -238,6 +238,9 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [selectedTicker, setSelectedTicker] = useState(initialTicker);
   const [seconds, setSeconds] = useState(() => snapshotIntervalSeconds(initialSnapshot));
+  const [clockMillis, setClockMillis] = useState(() => Date.parse(initialSnapshot.session?.serverTime ?? initialSnapshot.asOf));
+  const [bellNotice, setBellNotice] = useState("");
+  const previousBell = useRef(initialSnapshot.session?.ready ? initialSnapshot.status : null);
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("all");
   const [listingSort, setListingSort] = useState<ListingSort>("name");
@@ -290,6 +293,7 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
 
   useEffect(() => {
     let nextUpdateAt = initialSnapshot.nextUpdateAt;
+    let clockOffset = Date.parse(initialSnapshot.session?.serverTime ?? initialSnapshot.asOf) - Date.now();
     let refreshTimer: number | undefined;
     let pending = false;
     let stopped = false;
@@ -302,6 +306,7 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
         if (response.ok) {
           const latest = await response.json() as MarketSnapshot;
           nextUpdateAt = latest.nextUpdateAt;
+          clockOffset = Date.parse(latest.session?.serverTime ?? latest.asOf) - Date.now();
           if (!stopped) setSnapshot(latest);
         }
       } catch {
@@ -310,14 +315,16 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
         pending = false;
         if (!stopped) {
           window.clearTimeout(refreshTimer);
-          refreshTimer = window.setTimeout(refresh, Math.max(30_000, Math.min(300_000, Date.parse(nextUpdateAt) - Date.now() + 1_000)));
+          refreshTimer = window.setTimeout(refresh, Math.max(1_000, Math.min(300_000, Date.parse(nextUpdateAt) - Date.now() - clockOffset + 1_000)));
         }
       }
     };
     void refresh();
     const countdownTimer = window.setInterval(() => {
-      setSeconds(secondsUntil(nextUpdateAt));
-      setDataDelayed(Date.now() > Date.parse(nextUpdateAt) + 60_000);
+      const now = Date.now() + clockOffset;
+      setClockMillis(now);
+      setSeconds(secondsUntil(nextUpdateAt, now));
+      setDataDelayed(now > Date.parse(nextUpdateAt) + 60_000);
     }, 1_000);
     const onVisibility = () => { if (!document.hidden) void refresh(); };
     document.addEventListener("visibilitychange", onVisibility);
@@ -328,7 +335,35 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
       window.clearInterval(countdownTimer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [initialSnapshot.nextUpdateAt]);
+  }, [initialSnapshot.nextUpdateAt, initialSnapshot.asOf, initialSnapshot.session?.serverTime]);
+
+  const bellReady = snapshot.session?.ready;
+  const bellEra = snapshot.session?.era;
+  const bellDay = snapshot.session?.session.day;
+  useEffect(() => {
+    const previous = previousBell.current;
+    previousBell.current = bellReady ? snapshot.status : null;
+    if (!previous || !bellReady || previous === snapshot.status) return;
+    const event = `${bellEra}-${bellDay}-${snapshot.status}`;
+    try {
+      if (localStorage.getItem("royal-exchange-last-bell-v1") === event) return;
+      localStorage.setItem("royal-exchange-last-bell-v1", event);
+    } catch { /* Session notifications still work with unavailable storage. */ }
+    const timer = window.setTimeout(() => setBellNotice(snapshot.status === "OPEN" ? "Opening bell · Trading has resumed" : "Closing bell · Prices are fixed until the next session"),0);
+    const clear = window.setTimeout(() => setBellNotice(""),5000);
+    if (navigator.userActivation?.hasBeenActive && window.AudioContext) {
+      const context = new AudioContext();
+      if (context.state === "running") {
+        const tone = context.createOscillator(), gain = context.createGain();
+        tone.frequency.value = snapshot.status === "OPEN" ? 880 : 660;
+        gain.gain.setValueAtTime(0.025,context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001,context.currentTime + 0.35);
+        tone.connect(gain).connect(context.destination); tone.start(); tone.stop(context.currentTime + 0.35);
+        tone.onended = () => { void context.close(); };
+      } else { void context.close(); }
+    }
+    return () => { window.clearTimeout(timer); window.clearTimeout(clear); };
+  }, [snapshot.status, bellReady, bellEra, bellDay]);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -525,8 +560,15 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
   }, [view, compositeRange, snapshot.tick]);
 
   const compositePoints = compositeHistory?.range === compositeRange ? compositeHistory.points : [];
-  const countdown = seconds > 0 ? Math.floor(seconds / 60).toString().padStart(2, "0") + ":" + (seconds % 60).toString().padStart(2, "0") : "Clearing";
+  const countdown = seconds >= 86400 ? `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h`
+    : seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`
+    : seconds > 0 ? Math.floor(seconds / 60).toString().padStart(2, "0") + ":" + (seconds % 60).toString().padStart(2, "0") : "Updating";
   const asOf = easternTime(snapshot.asOf) + " " + easternZone(snapshot.asOf);
+  const clock = new Date(clockMillis).toISOString();
+  const nextOpening = snapshot.session ? new Date(snapshot.session.nextOpeningAt).toISOString() : snapshot.nextUpdateAt;
+  const openingLabel = new Intl.DateTimeFormat("en-US",{timeZone:EASTERN_TIME_ZONE,weekday:"short",hour:"numeric",minute:"2-digit"}).format(new Date(nextOpening));
+  const progress = snapshot.status === "OPEN" && snapshot.session ? Math.max(0,Math.min(1,
+    (clockMillis-snapshot.session.session.opensAt)/(snapshot.session.session.closesAt-snapshot.session.session.opensAt))) : 0;
   const periodLabel = HISTORY_RANGES.find((range) => range.value === compositeRange)?.label ?? "1D";
   const periodChange = compositePoints.length > 1 ? compositePoints.at(-1)!.value - compositePoints[0].value : null;
   const activeNotices = snapshot.events.length ? snapshot.events : [snapshot.event];
@@ -582,10 +624,10 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
       <header className="site-header">
         <div className="utility-bar"><div className="utility-inner">
           <span className="utility-status">Market {snapshot.status.toLowerCase()}</span>
-          <span>Five-minute clearing</span>
-          <span className="utility-countdown">Next clearing <b>{countdown}</b></span>
+          <span>09:30–16:00 ET · NYSE calendar</span>
+          <span className="utility-countdown" title={snapshot.status === "OPEN" && snapshot.session ? "Closes " + easternTime(new Date(snapshot.session.session.closesAt).toISOString()) + " ET" : "Next opening " + openingLabel + " ET"}>{snapshot.status === "OPEN" ? "Next clearing" : "Opens " + openingLabel} <b>{countdown}</b></span>
           <span className="utility-data" role="status">{dataDelayed ? "Simulated · quotes delayed" : snapshot.historyMode === "recorded-ledger" ? "Simulated market" : "Simulated · indicative quotes"}</span>
-          <time dateTime={snapshot.asOf}>{"As of " + asOf}</time>
+          <time dateTime={clock} title={"Last recorded price: " + easternDate(snapshot.asOf) + " · " + asOf}>{easternTime(clock) + " " + easternZone(clock)}</time>
         </div></div>
         <div className="masthead">
           <Link className="brand" href="/" aria-label="Royal Exchange home"><span className="brand-mark" aria-hidden="true">RX</span><span className="brand-wordmark"><strong>Royal Exchange</strong><small>The Crown Market at Guildhall</small></span></Link>
@@ -593,6 +635,13 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
           <button className="theme-toggle" type="button" aria-pressed={theme === "dark"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}>{theme === "dark" ? "Light mode" : "Dark mode"}</button>
         </div>
       </header>
+
+      <div className="session-strip">
+        <span>{snapshot.session?.era ? `Trading era ${snapshot.session.era} · Established ${easternDate(snapshot.session.startedAt!)}` : snapshot.historyMode === "recorded-ledger" ? "Preparing the new trading era" : "Recorded market temporarily unavailable"}</span>
+        <span>{snapshot.status === "OPEN" && snapshot.session ? "Closes " + easternTime(new Date(snapshot.session.session.closesAt).toISOString()) + " ET" : "Prices remain fixed until the opening bell"}</span>
+        {snapshot.status === "OPEN" && <progress max={1} value={progress} aria-label="Trading session progress" />}
+        <span role="status" aria-live="polite">{bellNotice}</span>
+      </div>
 
       {view === "overview" && <section className="ticker-tape" aria-label="Selected issuer quotes"><div className="ticker-track" role="group" aria-label="Scroll issuer quotes" tabIndex={0}><span className="ticker-label">Last clearing</span>{snapshot.companies.slice(0, 6).map((company) => <Link className="ticker-item" key={company.ticker} href={issuerHref(company.ticker)}><b>{company.ticker}</b><span>{number(company.price)}</span><Move value={company.changePercent} /></Link>)}</div></section>}
 
@@ -650,16 +699,16 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
             <div className="focus-heading"><div><span className="eyebrow">{selected.ticker + " · " + selected.sector}</span><h1 id="issuer-heading">{selected.name}</h1><p>{selected.influence}</p></div><div className="focus-price"><strong>{number(selected.price)}</strong><small>Crowns</small><div className="focus-change"><span className={selected.change >= 0 ? "positive" : "negative"}>{signed(selected.change)}</span><Move value={selected.changePercent} /><small>session</small></div></div></div>
             <div className="issuer-actions"><button className="action-button" onClick={() => openCharter(selected.ticker)}>Company Charter</button><button className="action-button secondary" aria-pressed={ledgerTickers.includes(selected.ticker)} onClick={() => toggleLedger(selected.ticker)}>{ledgerTickers.includes(selected.ticker) ? "Remove from Ledger" : "Add to Ledger"}</button><span>{"As of " + asOf}</span></div>
             <div className="issuer-grid"><div className="issuer-chart"><div className="history-controls"><div className="history-range" role="group" aria-label="Recorded history range">{HISTORY_RANGES.map((range) => <button type="button" key={range.value} className={historyRange === range.value ? "selected" : ""} aria-pressed={historyRange === range.value} onClick={() => setHistoryRange(range.value)}>{range.label}</button>)}</div><div className="history-status" aria-live="polite">{historyLoading ? "Loading " + historyLabel + " history…" : chartChangeCrowns === null || chartChangePercent === null ? historyLabel + " performance unavailable" : historyLabel + " " + signed(chartChangeCrowns) + " (" + signed(chartChangePercent, "%") + ")"}</div></div><Chart points={chartHistory} positive={chartPositive} theme={theme} reference={historyRange === "24h" ? selected.previousClose : undefined} /><div className="chart-labels"><span>{chartHistory.length ? easternDate(chartHistory[0].time) : "Awaiting observation"}</span><span>{"As of " + asOf}</span></div><p className="history-disclosure">Recorded auctions only.{snapshot.recordedFrom ? " History begins " + easternDate(snapshot.recordedFrom) + "." : ""}</p></div>
-              <dl className="instrument-stats"><div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div><div><dt>Open</dt><dd>{number(selected.open)}</dd></div><div><dt>High / low</dt><dd>{number(selected.high) + " / " + number(selected.low)}</dd></div><div><dt>Bid / ask</dt><dd>{number(selected.bid) + " / " + number(selected.ask)}</dd></div><div><dt>Session volume</dt><dd>{number(selected.volume, 0)}</dd></div><div><dt>Last clearing trades</dt><dd>{number(selected.trades, 0)}</dd></div></dl>
+              <dl className="instrument-stats"><div><dt>Previous close</dt><dd>{number(selected.previousClose)}</dd></div><div><dt>Open</dt><dd>{number(selected.open)}</dd></div><div><dt>Opening gap</dt><dd><Move value={selected.previousClose ? (selected.open / selected.previousClose - 1) * 100 : 0} /></dd></div><div><dt>High / low</dt><dd>{number(selected.high) + " / " + number(selected.low)}</dd></div><div><dt>Bid / ask</dt><dd>{number(selected.bid) + " / " + number(selected.ask)}</dd></div><div><dt>Session volume</dt><dd>{number(selected.volume, 0)}</dd></div><div><dt>Last clearing trades</dt><dd>{number(selected.trades, 0)}</dd></div></dl>
             </div>
           </section>
           <section className="issuer-wares"><div className="section-heading"><div><span className="eyebrow">Principal wares</span><h2>In the Price Book</h2></div><Link className="quiet-link" href="/price-book">Open the commodity register</Link></div>{renderPriceRows(MINECRAFT_ITEMS.filter((item) => item.ticker === selected.ticker).slice(0, 6).map((item) => ({ item, company: selected })))}</section>
         </>}
 
         {view === "data" && <>
-          <div className="page-title"><span className="eyebrow">Public record · Methodology</span><h1>Market Data &amp; Methodology</h1><p>The Royal Exchange is a fictional Minecraft financial institution. Its market runs continuously; all prices and activity are simulated.</p></div>
-          <div className="data-layout"><div className="methodology"><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. A shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, persistent order flow and market notices influence the participants. Most price changes are small, with quiet and turbulent periods and occasional larger moves. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>Longer ranges sample actual recorded observations. Gaps remain gaps in the record; the plotted line connects observations and does not claim trades between them.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
-          <aside className="data-register"><section><h2 className="eyebrow">Publication status</h2><dl className="data-facts"><div><dt>Data</dt><dd>{snapshot.historyMode === "recorded-ledger" ? "Recorded clearing prices" : "Indicative quotes"}</dd></div><div><dt>As of</dt><dd>{easternDate(snapshot.asOf) + " · " + asOf}</dd></div><div><dt>Next clearing</dt><dd>{countdown}</dd></div><div><dt>Recorded since</dt><dd>{snapshot.recordedFrom ? easternDate(snapshot.recordedFrom) : "Not yet available"}</dd></div><div><dt>Recorded clearings</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div><div><dt>Model</dt><dd>{snapshot.modelVersion}</dd></div></dl></section>
+          <div className="page-title"><span className="eyebrow">Public record · Methodology</span><h1>Market Data &amp; Methodology</h1><p>The Royal Exchange is a fictional Minecraft financial institution. Trading follows the NYSE calendar; all prices and activity are simulated.</p></div>
+          <div className="data-layout"><div className="methodology"><section><h2>The trading calendar</h2><p>Monday–Friday, 9:30 AM–4:00 PM America/New_York, with NYSE holidays, scheduled 1:00 PM early closes and automatic daylight saving adjustments. Prices freeze outside the session. The next opening appears above every page.</p><p>The opening auction preserves the previous close and may include a bounded gap reflecting issuer volatility, shared market news and the length of the closure. A gap is applied once per session. Completed sessions are archived; downtime creates no invented auctions.</p></section><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. During trading hours, a shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, persistent order flow and market notices influence the participants. Most price changes are small, with quiet and turbulent periods and occasional larger moves. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>Longer ranges sample actual recorded observations. Gaps remain gaps in the record; the plotted line connects observations and does not claim trades between them.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
+          <aside className="data-register"><section><h2 className="eyebrow">Publication status</h2><dl className="data-facts"><div><dt>Data</dt><dd>{snapshot.historyMode === "recorded-ledger" ? "Recorded clearing prices" : "Indicative quotes"}</dd></div><div><dt>As of</dt><dd>{easternDate(snapshot.asOf) + " · " + asOf}</dd></div><div><dt>{snapshot.status === "OPEN" ? "Next clearing" : "Next opening"}</dt><dd>{countdown}</dd></div><div><dt>Recorded since</dt><dd>{snapshot.recordedFrom ? easternDate(snapshot.recordedFrom) : "Not yet available"}</dd></div><div><dt>Recorded clearings</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div><div><dt>Model</dt><dd>{snapshot.modelVersion}</dd></div></dl></section>
           <section><h2>Public API</h2><p>The same market record, available as JSON.</p><ul className="api-links"><li><a href="/api/market">Full market snapshot <code>/api/market</code></a></li><li><a href="/api/v1/overview">Market overview <code>/api/v1/overview</code></a></li><li><a href="/api/composite-history?period=24h">Recorded RXC history <code>/api/composite-history</code></a></li><li><a href="/openapi.json">API / OpenAPI schema <code>/openapi.json</code></a></li></ul><p className="technical-note">Composite history accepts period=24h, 7d, 30d or all. Up to 576 recorded points are returned; the daily chart retains every five-minute clearing. The read-only MCP endpoint is <code>/mcp</code>.</p></section>
           <section><h2>Institutional references</h2><p>Guild names and trade streets draw on London’s mercantile history.</p><ul className="reference-links"><li><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City of London livery companies</a></li><li><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Company of Merchant Staplers</a></li></ul></section></aside></div>
         </>}

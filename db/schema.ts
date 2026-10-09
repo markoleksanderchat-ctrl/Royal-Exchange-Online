@@ -1,6 +1,22 @@
 import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
+export const marketEra = sqliteTable("market_era", {
+  id: integer("id").primaryKey(),
+  version: integer("version").notNull(),
+  startedAt: text("started_at").notNull(),
+  baselineTick: integer("baseline_tick").notNull(),
+  backupSha256: text("backup_sha256").notNull(),
+});
+
+export const marketSessions = sqliteTable("market_sessions", {
+  day: text("day").primaryKey(),
+  opensAt: text("opens_at").notNull(),
+  closesAt: text("closes_at").notNull(),
+  lastTick: integer("last_tick").notNull(),
+  snapshotJson: text("snapshot_json").notNull(),
+});
+
 export const marketTicks = sqliteTable("market_ticks", {
   tick: integer("tick").primaryKey(),
   observedAt: text("observed_at").notNull(),
