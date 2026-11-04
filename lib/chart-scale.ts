@@ -1,4 +1,6 @@
 import type { MarketHistoryPoint } from "./market";
+import { easternDay } from "./market-calendar.ts";
+import { tradingTimeScale } from "./trading-time.ts";
 
 const EASTERN_TIME_ZONE = "America/New_York";
 
@@ -38,4 +40,24 @@ export function timeAxis(points: MarketHistoryPoint[], width: number) {
     ticks.push({ time, label: formatter.format(new Date(time)) });
   }
   return ticks;
+}
+
+/** Same label styling, positioned in open-market time instead of closed hours. */
+export function tradingTimeAxis(points: MarketHistoryPoint[], width: number, scale=tradingTimeScale(points)) {
+  if (points.length<2) return [];
+  const start=Date.parse(points[0].time),end=Date.parse(points.at(-1)!.time);
+  if (easternDay(start)===easternDay(end)) return timeAxis(points,width).map(tick => ({...tick,position:scale.position(tick.time)}));
+  const formatter=new Intl.DateTimeFormat("en-US",{ month:"short",...(end-start>180*86_400_000 ? {year:"2-digit"} : {day:"numeric"}),timeZone:EASTERN_TIME_ZONE });
+  const candidates=scale.sessions.filter(session => session.opensAt>=start && session.opensAt<=end)
+    .map(session => ({time:session.opensAt,label:formatter.format(session.opensAt),position:scale.position(session.opensAt)}));
+  const count=Math.max(2,Math.min(5,Math.floor(width/90))),selected=new Set<number>();
+  for (let index=0;index<count && candidates.length;index++) {
+    const target=scale.span*index/(count-1);
+    selected.add(candidates.reduce((best,tick,i) => Math.abs(tick.position-target)<Math.abs(candidates[best].position-target) ? i : best,0));
+  }
+  let lastPosition=-Infinity,lastLabel="";
+  return candidates.filter((tick,index) => {
+    if (!selected.has(index) || tick.position-lastPosition<scale.span*75/Math.max(1,width) || tick.label===lastLabel) return false;
+    lastPosition=tick.position;lastLabel=tick.label;return true;
+  });
 }

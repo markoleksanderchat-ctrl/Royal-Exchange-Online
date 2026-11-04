@@ -41,8 +41,8 @@ test("all four ranges retain every available intraday observation, real ties and
   const all=await readCompositeHistory(db,"all",anchor);
   assert.ok(all.some((p,i)=>i&&p.value===all[i-1].value),"genuine unchanged prices are preserved");
   const runs=splitHistory(all);
-  assert.ok(runs.length>20,"sessions and a missing auction form separate runs");
-  assert.ok(runs.every(run=>run.every((p,i)=>!i||Date.parse(p.time)-Date.parse(run[i-1].time)===300000)));
+  assert.equal(runs.length,2,"only the missing auction breaks the history, not twenty complete session boundaries");
+  assert.ok(all.some((p,i)=>i&&p.segment===all[i-1].segment&&p.time.slice(0,10)!==all[i-1].time.slice(0,10)),"legitimate overnight prices remain connected");
   assert.ok(db.queries.every(sql=>!/^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER)/i.test(sql)),"history requests are SELECT-only");
   db.sqlite.close();
 });
@@ -81,11 +81,35 @@ test("ordinal query plans cover only requested observations including partial bu
   }
 });
 
+test("adaptive aggregation connects complete sessions and retains a true missing auction",async()=>{
+  const db=fixture();let sequence=0;
+  for(let day=0;day<120;day++) {
+    const session=sessionFor(new Date(Date.parse("2026-01-02T12:00:00Z")+day*86400000).toISOString().slice(0,10));
+    if(!session)continue;
+    for(let time=session.opensAt;time<session.closesAt;time+=300000) {
+      const index=sequence++;
+      if(index===1200)continue;
+      insert(db,time,index===5301?450:index===5302?1800:1000+(index%11)/100);
+    }
+  }
+  assert.ok(sequence>4096);index(db);
+  const all=await readCompositeHistory(db,"all",Date.parse("2026-05-04T20:00:00Z"));
+  assert.ok(all.length<=4096);
+  assert.equal(splitHistory(all).length,2,"complete nights, weekends and holidays never split aggregated history");
+  assert.ok(all.some(point=>point.value===450)&&all.some(point=>point.value===1800));
+  const source=new Map(db.sqlite.prepare("SELECT observed_at,composite FROM market_ticks").all().map(row=>[row.observed_at,row.composite]));
+  assert.ok(all.every(point=>source.get(point.time)===point.value));
+  const seek=db.queries.find(sql=>sql.includes('json_each'));
+  assert.ok(seek,'selected envelope extrema use indexed ordinal lookups');
+  assert.ok(db.sqlite.prepare('EXPLAIN QUERY PLAN '+seek).all('[]').some(row=>/SEARCH rxc_history_points USING (?:COVERING )?INDEX/.test(row.detail)));
+  db.sqlite.close();
+});
+
 test("missing, stale and single-point history are disclosed rather than synthesized",async()=>{
   const db=fixture();index(db);assert.deepEqual(await readCompositeHistory(db,"all"),[]);
   insert(db,300000,1000);await assert.rejects(readCompositeHistory(db,"all"),/catching up/);
   await syncRxcHistoryIndex(db);
-  assert.deepEqual(await readCompositeHistory(db,"all"),[{time:"1970-01-01T00:05:00.000Z",value:1000,segment:5}]);db.sqlite.close();
+  assert.deepEqual(await readCompositeHistory(db,"all"),[{time:"1970-01-01T00:05:00.000Z",value:1000,segment:0}]);db.sqlite.close();
 });
 
 test("RXC endpoint validates inputs and preserves unavailable-history contracts",async()=>{

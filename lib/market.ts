@@ -5,7 +5,7 @@ export type MarketSession = ExchangeCalendar & { serverTime: string; era: number
 export type MarketHistoryPoint = {
   time: string;
   value: number;
-  /** Contiguous recorded run; changes at a missing auction or session closure. */
+  /** Recorded coverage run; changes only at missing/unreliable observations. */
   segment?: number;
 };
 

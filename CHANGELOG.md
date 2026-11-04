@@ -1,5 +1,11 @@
 # Royal Exchange Online releases
 
+## 0.1.2 — Trading-time chart continuity
+
+- Correct the 0.1.1 regression that split every session while retaining closed calendar time on the X-axis.
+- Compress scheduled closures and connect recorded closing/opening prices; retain genuine missing-auction and missing-session breaks using original observation sequences.
+- Use the same trading-time transform for price paths, time labels, crosshairs and pointer selection. Preserve raw prices, timestamps, extrema aggregation, design and D1 indexes without another migration.
+
 ## 0.1.1 — Recorded RXC history correction
 
 - Retain available intraday observations across all four ranges; replace calendar-time targets with extrema-preserving indexed summaries for larger histories.

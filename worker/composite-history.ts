@@ -17,7 +17,7 @@ export async function handleCompositeHistory(request: Request, env: { DB?: D1Dat
     const cache = typeof caches !== "undefined" && "default" in caches ? (caches as CacheStorage & {default:Cache}).default : null;
     const latest = env.DB && cache ? await env.DB.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").first<{tick:number}>() : null;
     const cacheUrl = new URL(request.url);
-    cacheUrl.search = new URLSearchParams({period,version:"rxc-history-2",tick:String(latest?.tick ?? "empty")}).toString();
+    cacheUrl.search = new URLSearchParams({period,version:"rxc-history-3",tick:String(latest?.tick ?? "empty")}).toString();
     const cacheKey = new Request(cacheUrl);
     if (cache && latest) {
       const cached = await cache.match(cacheKey).catch(() => undefined);

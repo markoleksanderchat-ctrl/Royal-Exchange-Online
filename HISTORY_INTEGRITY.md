@@ -1,5 +1,40 @@
 # Recorded RXC history and chart integrity
 
+## Trading-time correction (0.1.2)
+
+The 0.1.1 correction retained the real prices but introduced a presentation
+regression: its derived `segment` changed at every five-minute timestamp gap,
+including normal scheduled closures. The renderer broke the line at all those
+boundaries while spacing observations by elapsed wall-clock time. Overnight
+closures and weekends therefore occupied most of the chart, squeezing complete
+sessions into disconnected fragments. This was segmentation/axis logic, not
+missing database history: the current source and derived index both contain
+1,324 matching, chronologically ordered observations with unique timestamps.
+
+The corrected X-axis counts only scheduled open-market milliseconds. A regular
+session's 15:55 closing observation and the next session's 09:30 opening are one
+five-minute clearing interval apart, including weekends, holidays, early closes
+and daylight saving changes. Their two actual prices are connected, preserving
+the overnight change without inserting any prices or stretching it across a
+night or weekend. Labels, pointer selection and crosshairs use the same transform.
+
+Public continuity metadata is derived from original observation sequence counts
+and the exchange calendar. Expected open-market clearing slots are compared with
+the number of actual underlying records between selected prices. Equal counts
+permit a connection even when aggregation omitted intermediate records. Unequal
+counts retain a break for a genuinely absent auction, incomplete session or
+entire missing trading day. A date change alone never breaks the line. The
+original out-of-session establishment baseline remains a distinct recorded dot.
+The old 21 storage runs become five chart runs: the baseline and four market
+runs separated by the three real missing auctions. 7D has four runs; 1D has one.
+
+No database migration or stored-record rewrite is required. The original derived
+storage segments remain unchanged; only API continuity metadata and rendering
+change. For aggregated extrema, sequence lookups use the existing unique
+timestamp index and only the selected observations (at most 4,096). Raw ranges
+already return their sequence in the same indexed read. The edge-cache version
+changes so stale session-segmentation metadata cannot be reused.
+
 ## Cause confirmed against production on November 4, 2026
 
 The ledger contained 1,324 original observations. The old 7D endpoint returned
@@ -22,8 +57,8 @@ baseline remains an isolated historical point; it is not an invented auction.
 
 ## Retrieval and rendering
 
-- Each observation gets a stable sequence number and a contiguous-run identifier.
-  A missing five-minute observation or closed session starts another run.
+- Each stored observation has a stable sequence number. Public coverage-run
+  identifiers distinguish genuinely missing records from scheduled closures.
 - Up to 4,096 observations are returned unchanged. All currently available 1D,
   7D, 30D and ALL intraday observations fit within that limit.
 - Larger histories use indexed four-way summaries containing the actual first,
@@ -32,7 +67,7 @@ baseline remains an isolated historical point; it is not an invented auction.
   reduction retains extrema and endpoints in time order. Samples are allocated
   by observation count, so closed calendar hours cannot consume the budget.
 - Every returned time/value pair comes from the original ledger. Run identifiers
-  survive aggregation. Both the stroke and area fill restart at run boundaries;
+  survive aggregation. Both the stroke and area fill restart only at genuine coverage gaps;
   isolated observations are dots. Pointer inspection does not assign a price to
   an empty interval. Colors, typography, axes, controls and layout are preserved.
 - Identical transport duplicates are collapsed. Conflicting simultaneous prices
@@ -70,3 +105,6 @@ crashes/recoveries, transaction races, delayed cron jobs and retry behavior.
 The production backup was restored and the additive migration preserved every
 original table byte-for-byte at the row-data level. Rendered desktop/mobile
 checks inspect actual canvas stroke and fill paths as well as chart images.
+The trading-time regression checks compare every rendered X coordinate with the
+open-market transform, verify adjacent complete sessions remain connected and
+retain true missing-auction gaps even after adaptive aggregation.

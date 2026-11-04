@@ -21,10 +21,9 @@ export function normalizeHistory(input: MarketHistoryPoint[]): MarketHistoryPoin
 
 export function historyBreak(left: MarketHistoryPoint, right: MarketHistoryPoint) {
   if (left.segment !== undefined && right.segment !== undefined) return left.segment !== right.segment;
-  // Older issuer clients have no continuity metadata. At least preserve their
-  // session boundaries; sampled intraday spacing is not itself a missing tick.
-  return new Date(left.time).toLocaleDateString("en-CA", { timeZone: "America/New_York" })
-    !== new Date(right.time).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  // A sampled series without coverage metadata cannot establish a missing
+  // record. A date change alone is an expected closure, not a discontinuity.
+  return false;
 }
 
 export function splitHistory(points: MarketHistoryPoint[]): MarketHistoryPoint[][] {

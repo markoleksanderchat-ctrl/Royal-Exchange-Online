@@ -1,5 +1,6 @@
 import { marketSessionStartTick, type MarketHistoryPoint } from "./market.ts";
 import { normalizeHistory, sampleHistoryExtrema } from "./history-series.ts";
+import { recordedContinuity } from "./trading-time.ts";
 
 export const MAX_RXC_HISTORY_POINTS = 4096;
 const LEVELS = 10;
@@ -18,7 +19,7 @@ export const rxcHistorySchemaStatements = [
 type IndexedPoint = { seq: number; tick: number; observed_at: string; value: number; segment: number };
 type SourcePoint = { tick: number; observed_at: string; composite: number };
 type Envelope = { level: number; bucket: number; first: IndexedPoint; low: IndexedPoint; high: IndexedPoint; last: IndexedPoint; count: number };
-type Rollup = { first_json: string; low_json: string; high_json: string; last_json: string; observations: number };
+type Rollup = { first_seq:number; last_seq:number; first_json: string; low_json: string; high_json: string; last_json: string; observations: number };
 const publicPoint = (point: IndexedPoint): MarketHistoryPoint => ({ time: point.observed_at, value: point.value, segment: point.segment });
 
 export function rxcAppendStatements(db: D1Database, rows: SourcePoint[], previous: IndexedPoint | null): D1PreparedStatement[] {
@@ -111,19 +112,32 @@ export async function readRxcHistory(db: D1Database, minutes: number | null, now
   if (first === undefined || last === undefined) return [];
   const plan = rxcReadPlan(first,last);
   const results = await db.batch(plan.map(part => part.level === 0
-    ? db.prepare("SELECT observed_at,value,segment FROM rxc_history_points WHERE seq >= ? AND seq <= ? ORDER BY seq").bind(part.from,part.to)
-    : db.prepare("SELECT first_json,low_json,high_json,last_json,observations FROM rxc_history_rollups WHERE level = ? AND bucket >= ? AND bucket <= ? ORDER BY bucket").bind(part.level,part.from,part.to)));
+    ? db.prepare("SELECT seq,observed_at,value,segment FROM rxc_history_points WHERE seq >= ? AND seq <= ? ORDER BY seq").bind(part.from,part.to)
+    : db.prepare("SELECT first_seq,last_seq,first_json,low_json,high_json,last_json,observations FROM rxc_history_rollups WHERE level = ? AND bucket >= ? AND bucket <= ? ORDER BY bucket").bind(part.level,part.from,part.to)));
   const points: MarketHistoryPoint[] = [];
+  const sequences = new Map<string,number>();
   for (let index=0;index<plan.length;index++) {
     if (results[index].results.length !== plan[index].to-plan[index].from+1) throw new Error("Recorded RXC summary index is incomplete");
-    if (plan[index].level === 0) for (const row of results[index].results as unknown as IndexedPoint[]) points.push(publicPoint(row));
+    if (plan[index].level === 0) for (const row of results[index].results as unknown as IndexedPoint[]) {
+      points.push(publicPoint(row)); sequences.set(row.observed_at,row.seq);
+    }
     else for (const row of results[index].results as unknown as Rollup[]) {
       if (row.observations !== 4 ** plan[index].level) throw new Error("Recorded RXC summary has incomplete coverage");
-      points.push(...[row.first_json,row.low_json,row.high_json,row.last_json].map(value => JSON.parse(value) as MarketHistoryPoint));
+      const envelope=[row.first_json,row.low_json,row.high_json,row.last_json].map(value => JSON.parse(value) as MarketHistoryPoint);
+      points.push(...envelope); sequences.set(envelope[0].time,row.first_seq); sequences.set(envelope[3].time,row.last_seq);
     }
   }
   if (points.some(point => !Number.isFinite(point.value) || point.value <= 0 || !Number.isFinite(Date.parse(point.time)))) throw new Error("Invalid recorded RXC history");
-  return sampleHistoryExtrema(normalizeHistory(points),MAX_RXC_HISTORY_POINTS);
+  const selected=sampleHistoryExtrema(normalizeHistory(points),MAX_RXC_HISTORY_POINTS);
+  const missing=selected.filter(point => !sequences.has(point.time)).map(point => point.time);
+  if (missing.length) {
+    // Only selected extrema need an extra ordinal lookup. The unique timestamp
+    // index bounds this read; source history is neither scanned nor rewritten.
+    const rows=await db.prepare("SELECT observed_at,seq FROM rxc_history_points WHERE observed_at IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(missing)).all<{observed_at:string;seq:number}>();
+    for (const row of rows.results) sequences.set(row.observed_at,row.seq);
+  }
+  return recordedContinuity(selected,selected.map(point => sequences.get(point.time)!));
 }
 
 /** One-time additive migration: only recorded market_ticks feed the derived index. */
