@@ -5,6 +5,7 @@ import { ITEM_IMAGES } from "./item-images";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ListedCompany, MarketHistoryPoint, MarketSnapshot } from "../lib/market";
 import { priceAxis, timeAxis } from "../lib/chart-scale";
+import { historyBreak, normalizeHistory, splitHistory } from "../lib/history-series";
 import { MINECRAFT_ITEM_COUNT, MINECRAFT_ITEMS, MINECRAFT_VERSION } from "./minecraft-items";
 import { charterRecord, PRICE_BOOK_SUGGESTIONS, standingFor } from "./market-records";
 
@@ -69,9 +70,11 @@ function easternZone(value: string) {
     .find((part) => part.type === "timeZoneName")?.value ?? "ET";
 }
 
-function Chart({ points, positive, theme, unit = "Crowns", reference }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode; unit?: string; reference?: number }) {
+function Chart({ points: inputPoints, positive, theme, unit = "Crowns", reference }: { points: MarketHistoryPoint[]; positive: boolean; theme: ThemeMode; unit?: string; reference?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const points = useMemo(() => normalizeHistory(inputPoints),[inputPoints]);
+  const segments = useMemo(() => splitHistory(points),[points]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -131,19 +134,23 @@ function Chart({ points, positive, theme, unit = "Crowns", reference }: { points
         x: left + (right - left) * (timeSpan === 1 ? index / (points.length - 1) : (Date.parse(point.time) - startTime) / timeSpan),
         y: bottom - ((point.value - low) / range) * (bottom - top),
       }));
+      const byPoint = new Map(points.map((point,index) => [point,coordinates[index]]));
+      const runs = segments.map(segment => segment.map(point => byPoint.get(point)!));
       const color = styles.getPropertyValue(positive ? "--chart-up" : "--chart-down").trim() || (positive ? "#3c7755" : "#9e493d");
       const gradientTop = styles.getPropertyValue(positive ? "--chart-up-fill" : "--chart-down-fill").trim() || (positive ? "rgba(60, 119, 85, .28)" : "rgba(158, 73, 61, .26)");
       const fade = styles.getPropertyValue(positive ? "--chart-up-fade" : "--chart-down-fade").trim() || (positive ? "rgba(60, 119, 85, .03)" : "rgba(158, 73, 61, .03)");
       const gradient = context.createLinearGradient(0, top, 0, bottom);
       gradient.addColorStop(0, gradientTop);
       gradient.addColorStop(1, fade);
-      context.beginPath();
-      coordinates.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
-      context.lineTo(right, bottom);
-      context.lineTo(left, bottom);
-      context.closePath();
       context.fillStyle = gradient;
-      context.fill();
+      for (const run of runs) {
+        if (run.length < 2) continue;
+        context.beginPath();
+        run.forEach((point,index) => index === 0 ? context.moveTo(point.x,point.y) : context.lineTo(point.x,point.y));
+        context.lineTo(run.at(-1)!.x,bottom);
+        context.lineTo(run[0].x,bottom);
+        context.closePath(); context.fill();
+      }
 
       if (reference !== undefined && Number.isFinite(reference)) {
         const y = priceY(reference);
@@ -161,12 +168,16 @@ function Chart({ points, positive, theme, unit = "Crowns", reference }: { points
         context.fillText(label, Math.max(left, right - context.measureText(label).width - 4), y < top + 16 ? y + 14 : y - 6);
       }
       context.beginPath();
-      coordinates.forEach((point, index) => index === 0 ? context.moveTo(point.x, point.y) : context.lineTo(point.x, point.y));
+      for (const run of runs) run.forEach((point,index) => index === 0 ? context.moveTo(point.x,point.y) : context.lineTo(point.x,point.y));
       context.strokeStyle = color;
       context.lineWidth = 1.25;
       context.lineJoin = "round";
       context.lineCap = "round";
       context.stroke();
+      context.fillStyle = color;
+      for (const run of runs) if (run.length === 1) {
+        context.beginPath(); context.arc(run[0].x,run[0].y,1.75,0,Math.PI*2); context.fill();
+      }
       const latest = coordinates.at(-1)!;
       context.beginPath();
       context.arc(latest.x, latest.y, 2.5, 0, Math.PI * 2);
@@ -178,7 +189,7 @@ function Chart({ points, positive, theme, unit = "Crowns", reference }: { points
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [points, positive, theme, reference]);
+  }, [points, segments, positive, theme, reference]);
 
   if (points.length < 2) {
     return <div className="market-chart chart-recording" role="status">
@@ -193,6 +204,10 @@ function Chart({ points, positive, theme, unit = "Crowns", reference }: { points
     const progress = Math.max(0, Math.min(1, (clientX - bounds.left - 2) / Math.max(1, bounds.width - 74)));
     const targetTime = Date.parse(points[0].time) + progress * (Date.parse(points.at(-1)!.time) - Date.parse(points[0].time));
     const nearest = points.reduce((best, point, index) => Math.abs(Date.parse(point.time) - targetTime) < Math.abs(Date.parse(points[best].time) - targetTime) ? index : best, 0);
+    const after = points.findIndex(point => Date.parse(point.time) >= targetTime);
+    if (after > 0 && historyBreak(points[after-1],points[after]) && Math.abs(Date.parse(points[nearest].time)-targetTime) > 150_000) {
+      setHoverIndex(null); return;
+    }
     setHoverIndex(nearest);
   };
   const moveSelection = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
@@ -456,7 +471,7 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
     return () => controller.abort();
   }, [historyRange, selected.ticker, snapshot.tick, view]);
   const activeHistory = historyView?.ticker === selected.ticker && historyView.range === historyRange ? historyView : null;
-  const chartHistory = activeHistory?.points ?? (historyRange === "24h" ? selected.history : []);
+  const chartHistory = activeHistory?.points ?? (historyRange === "24h" && snapshot.historyMode === "recorded-ledger" ? selected.history : []);
   const chartFirst = chartHistory.at(0)?.value ?? null;
   const chartLast = chartHistory.at(-1)?.value ?? null;
   const derivedChartChange = chartHistory.length < 2 || chartFirst === null || chartLast === null ? null : Number((chartLast - chartFirst).toFixed(2));
@@ -707,9 +722,9 @@ export function MarketDashboard({ initialSnapshot, view = "overview", initialTic
 
         {view === "data" && <>
           <div className="page-title"><span className="eyebrow">Public record · Methodology</span><h1>Market Data &amp; Methodology</h1><p>The Royal Exchange is a fictional Minecraft financial institution. Trading follows the NYSE calendar; all prices and activity are simulated.</p></div>
-          <div className="data-layout"><div className="methodology"><section><h2>The trading calendar</h2><p>Monday–Friday, 9:30 AM–4:00 PM America/New_York, with NYSE holidays, scheduled 1:00 PM early closes and automatic daylight saving adjustments. Prices freeze outside the session. The next opening appears above every page.</p><p>The opening auction preserves the previous close and may include a bounded gap reflecting issuer volatility, shared market news and the length of the closure. A gap is applied once per session. Completed sessions are archived; downtime creates no invented auctions.</p></section><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. During trading hours, a shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, persistent order flow and market notices influence the participants. Most price changes are small, with quiet and turbulent periods and occasional larger moves. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>Longer ranges sample actual recorded observations. Gaps remain gaps in the record; the plotted line connects observations and does not claim trades between them.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
+          <div className="data-layout"><div className="methodology"><section><h2>The trading calendar</h2><p>Monday–Friday, 9:30 AM–4:00 PM America/New_York, with NYSE holidays, scheduled 1:00 PM early closes and automatic daylight saving adjustments. Prices freeze outside the session. The next opening appears above every page.</p><p>The opening auction preserves the previous close and may include a bounded gap reflecting issuer volatility, shared market news and the length of the closure. A gap is applied once per session. Completed sessions are archived; downtime creates no invented auctions.</p></section><section><h2>The five-minute clearing</h2><p>Rule-based merchant houses, guild funds, factors, speculators and market makers submit buy and sell limit orders. During trading hours, a shared auction every five minutes matches those orders to set issuer prices and traded volume.</p><p>Issuer fundamentals, supply and demand, liquidity, persistent order flow and market notices influence the participants. Most price changes are small, with quiet and turbulent periods and occasional larger moves. These are simulated orders, rather than player trades.</p></section><section><h2>Royal Exchange Composite</h2><p>RXC tracks all {snapshot.companies.length} listed issuers using the exchange’s established issuer weights and base prices. Session movement compares the latest clearing with the previous close.</p></section><section><h2>The recorded ledger</h2><p>Charts use observations saved by the exchange. No historical prices are invented or backfilled. A range with fewer than two observations has no meaningful performance change.</p><p>RXC retains recorded intraday observations; larger histories preserve recorded peaks and troughs. Closed sessions and missing observations break the line and its fill. No prices are inserted into those gaps.</p></section><section><h2>Commodity quotes</h2><p>The Price Book maps {number(MINECRAFT_ITEM_COUNT, 0)} vanilla Minecraft {MINECRAFT_VERSION} instruments to their responsible issuers. A linked quote is the issuer’s price in Crowns; it is not a separate valuation for an individual item.</p></section><section><h2>Your ledger &amp; Minecraft</h2><p>Your Merchant’s Ledger is a watchlist stored locally in this browser. The public API is read-only. Minecraft may read the exchange feed; gameplay never writes back to the public market.</p></section></div>
           <aside className="data-register"><section><h2 className="eyebrow">Publication status</h2><dl className="data-facts"><div><dt>Data</dt><dd>{snapshot.historyMode === "recorded-ledger" ? "Recorded clearing prices" : "Indicative quotes"}</dd></div><div><dt>As of</dt><dd>{easternDate(snapshot.asOf) + " · " + asOf}</dd></div><div><dt>{snapshot.status === "OPEN" ? "Next clearing" : "Next opening"}</dt><dd>{countdown}</dd></div><div><dt>Recorded since</dt><dd>{snapshot.recordedFrom ? easternDate(snapshot.recordedFrom) : "Not yet available"}</dd></div><div><dt>Recorded clearings</dt><dd>{number(snapshot.recordedObservations, 0)}</dd></div><div><dt>Model</dt><dd>{snapshot.modelVersion}</dd></div></dl></section>
-          <section><h2>Public API</h2><p>The same market record, available as JSON.</p><ul className="api-links"><li><a href="/api/market">Full market snapshot <code>/api/market</code></a></li><li><a href="/api/v1/overview">Market overview <code>/api/v1/overview</code></a></li><li><a href="/api/composite-history?period=24h">Recorded RXC history <code>/api/composite-history</code></a></li><li><a href="/openapi.json">API / OpenAPI schema <code>/openapi.json</code></a></li></ul><p className="technical-note">Composite history accepts period=24h, 7d, 30d or all. Up to 576 recorded points are returned; the daily chart retains every five-minute clearing. The read-only MCP endpoint is <code>/mcp</code>.</p></section>
+          <section><h2>Public API</h2><p>The same market record, available as JSON.</p><ul className="api-links"><li><a href="/api/market">Full market snapshot <code>/api/market</code></a></li><li><a href="/api/v1/overview">Market overview <code>/api/v1/overview</code></a></li><li><a href="/api/composite-history?period=24h">Recorded RXC history <code>/api/composite-history</code></a></li><li><a href="/openapi.json">API / OpenAPI schema <code>/openapi.json</code></a></li></ul><p className="technical-note">Composite history accepts period=24h, 7d, 30d or all. Up to 4,096 recorded RXC points are returned. All available intraday observations are retained within that limit; longer histories preserve recorded extrema. The read-only MCP endpoint is <code>/mcp</code>.</p></section>
           <section><h2>Institutional references</h2><p>Guild names and trade streets draw on London’s mercantile history.</p><ul className="reference-links"><li><a href="https://www.cityoflondon.gov.uk/about-us/law-historic-governance/livery-companies" target="_blank" rel="noreferrer">City of London livery companies</a></li><li><a href="https://merchantstaplers.co.uk/history-of-the-company/" target="_blank" rel="noreferrer">The Company of Merchant Staplers</a></li></ul></section></aside></div>
         </>}
       </main>

@@ -54,7 +54,7 @@ test('recording, cached reads and recovery preserve the ledger without rescannin
   assert.ok(first.companies.every(c => c.history.length === 1));
   db.queries = [];
   assert.deepEqual(await getRecordedMarketSnapshot(db, start), first);
-  assert.ok(db.queries.length <= 5, 'warm calendar snapshots use bounded state and primary-key reads');
+  assert.ok(db.queries.length <= 6, 'warm snapshots add one indexed RXC continuity cursor read');
   assert.match(db.queries[0], /FROM market_snapshot WHERE id = 1/);
 
   db.queries = [];

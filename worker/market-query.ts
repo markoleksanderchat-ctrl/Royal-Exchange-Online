@@ -2,6 +2,7 @@ import { charterRecord, standingFor } from "../app/market-records";
 import { MINECRAFT_ITEMS, MINECRAFT_ITEM_COUNT, MINECRAFT_VERSION } from "../app/minecraft-items";
 import { getMarketSnapshot, type ListedCompany, type MarketHistoryPoint, type MarketSnapshot } from "../lib/market";
 import { getRecordedIssuerHistory, getRecordedMarketSnapshot } from "../lib/market-ledger";
+import { sampleHistoryExtrema } from "../lib/history-series";
 
 export type MarketDataEnv = { DB?: D1Database };
 export type HistoryPeriod = "1h" | "6h" | "24h" | "7d" | "30d" | "all";
@@ -139,12 +140,11 @@ async function historyFor(
   historyPoints: number,
 ) {
   const minutes = PERIOD_MINUTES[period];
+  if (loaded.dataMode !== "recorded-ledger") return [];
   if (loaded.dataMode === "recorded-ledger" && minutes !== null && minutes <= 1_440) {
     const cutoff = Date.parse(loaded.snapshot.asOf) - minutes * 60_000;
     const points = company.history.filter((point) => Date.parse(point.time) >= cutoff);
-    if (points.length <= historyPoints) return points;
-    if (historyPoints === 1) return points.slice(-1);
-    return Array.from({ length: historyPoints }, (_, index) => points[Math.round(index * (points.length - 1) / (historyPoints - 1))]);
+    return sampleHistoryExtrema(points,historyPoints);
   }
   if (env.DB && loaded.dataMode === "recorded-ledger") {
     try {
@@ -158,7 +158,7 @@ async function historyFor(
       }));
     }
   }
-  return company.history.slice(-historyPoints);
+  return [];
 }
 
 export async function getOverview(env: MarketDataEnv, moverLimit = 5, requestId?: string) {

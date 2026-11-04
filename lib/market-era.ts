@@ -53,7 +53,7 @@ export function marketEraActivationStatements(db: D1Database, at: Date, backupSh
   const snapshot = buildMarketSnapshot(at, companies, [], "recorded-ledger", startedAt, 1, startedAt);
   snapshot.asOf = startedAt;
   const empty = "NOT EXISTS (SELECT 1 FROM market_era WHERE id = 1)";
-  const statements = ["market_snapshot", "market_trade_ticks", "issuer_market_state", "issuer_ticks", "market_ticks",
+  const statements = ["rxc_history_rollups", "rxc_history_points", "market_snapshot", "market_trade_ticks", "issuer_market_state", "issuer_ticks", "market_ticks",
     "market_anomalies", "market_anomaly_state", "market_sessions"].map(table => db.prepare(`DELETE FROM ${table} WHERE ${empty}`));
   statements.push(db.prepare(`INSERT INTO market_ticks (tick, observed_at, composite, total_volume, model_version, event_json)
     SELECT ?, ?, 1000, 0, ?, ? WHERE ${empty}`).bind(tick, startedAt, MARKET_MODEL_VERSION, JSON.stringify({ event: snapshot.event, events: [] })));

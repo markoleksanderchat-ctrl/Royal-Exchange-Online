@@ -36,7 +36,7 @@ const worker = {
       await activateMarketEraFromDeployment(env.DB, new Date(), env.MARKET_RESET_BACKUP_SHA256);
     }
 
-    if (url.pathname === "/api/composite-history") return handleCompositeHistory(request, env);
+    if (url.pathname === "/api/composite-history") return handleCompositeHistory(request, env, ctx);
 
     if (request.method === "GET" && url.pathname === "/api/market") {
       if (!env.DB) return Response.json(getMarketSnapshot(), { headers: marketHeaders("unavailable") });
@@ -81,7 +81,16 @@ const worker = {
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil((async () => {
       await activateMarketEraFromDeployment(env.DB, new Date(), env.MARKET_RESET_BACKUP_SHA256);
-      await getRecordedMarketSnapshot(env.DB, new Date(controller.scheduledTime));
+      // Use the execution clock; delayed jobs must not invent past auctions.
+      for (let attempt=0;attempt<2;attempt++) {
+        try { await getRecordedMarketSnapshot(env.DB,new Date()); break; }
+        catch (error) {
+          if (attempt===1) {
+            console.error("Scheduled market observation failed",{ scheduledAt:controller.scheduledTime,observedAt:Date.now() });
+            throw error;
+          }
+        }
+      }
     })());
   },
 };

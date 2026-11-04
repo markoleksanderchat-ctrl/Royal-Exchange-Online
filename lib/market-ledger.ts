@@ -1,6 +1,7 @@
 import { anomalySchemaStatements, resolveMarketAnomalies } from "./anomalies.ts";
 import { readMarketEra, scheduledSchemaStatements, type MarketEra } from "./market-era.ts";
 import { exchangeCalendar, sessionFor } from "./market-calendar.ts";
+import { lastRxcPoint, rxcAppendStatements, rxcHistorySchemaStatements, syncRxcHistoryIndex } from "./rxc-history.ts";
 import {
   buildMarketSnapshot,
   COMPANIES,
@@ -99,6 +100,7 @@ export const marketSchemaStatements = [
   "CREATE INDEX IF NOT EXISTS market_trade_ticks_ticker_tick_idx ON market_trade_ticks (ticker, tick)",
   ...anomalySchemaStatements,
   ...scheduledSchemaStatements,
+  ...rxcHistorySchemaStatements,
 ] as const;
 
 type IssuerRow = {
@@ -196,6 +198,11 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
   const existing = await db.prepare("SELECT tick FROM market_ticks WHERE tick = ?").bind(tick).first<{ tick: number }>();
   if (existing) return existing.tick;
 
+  const historyCursor = await syncRxcHistoryIndex(db);
+  const priorMarket = await db.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").first<{tick:number}>();
+  if (priorMarket && priorMarket.tick >= tick) return priorMarket.tick;
+  if (priorMarket && historyCursor?.tick !== priorMarket.tick) throw new Error("Recorded RXC history needs indexed recovery before another auction");
+
   const [anomalies, states] = await Promise.all([
     resolveMarketAnomalies(db, tick * MINUTE),
     db.prepare("SELECT * FROM issuer_market_state ORDER BY ticker").all<StateRow>(),
@@ -273,6 +280,7 @@ export async function recordMarketTick(db: D1Database, at = new Date()) {
           state.sessionVolume, state.previousClose, state.totalTrades),
     );
   }
+  statements.push(...rxcAppendStatements(db,[{ tick, observed_at: snapshot.asOf, composite: snapshot.composite }],historyCursor));
   try {
     // A competing recorder must roll back its entire batch, not overwrite the
     // winning tick's state. The primary key is the cross-isolate arbiter.
@@ -320,6 +328,8 @@ export async function getRecordedMarketSnapshot(db: D1Database, at = new Date())
   }
   const latest = await db.prepare("SELECT tick FROM market_ticks ORDER BY tick DESC LIMIT 1").first<{tick: number}>();
   if (!latest) throw new Error("Established market data is missing; recovery is required");
+  const indexed = await lastRxcPoint(db);
+  if (indexed?.tick !== latest.tick) await syncRxcHistoryIndex(db);
   const previous = cached?.tick === latest.tick ? cached : await readStoredSnapshot(db,at,latest.tick,null,era);
   await finalizeSession(db,previous,at);
   const currentTick = await recordMarketTick(db, at);

@@ -1,6 +1,19 @@
 import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
+export const rxcHistoryPoints = sqliteTable("rxc_history_points", {
+  seq: integer("seq").primaryKey(), tick: integer("tick").notNull().unique(),
+  observedAt: text("observed_at").notNull().unique(), value: real("value").notNull(), segment: integer("segment").notNull(),
+});
+
+export const rxcHistoryRollups = sqliteTable("rxc_history_rollups", {
+  level: integer("level").notNull(), bucket: integer("bucket").notNull(),
+  firstSeq: integer("first_seq").notNull(), lastSeq: integer("last_seq").notNull(),
+  firstJson: text("first_json").notNull(), lowJson: text("low_json").notNull(),
+  highJson: text("high_json").notNull(), lastJson: text("last_json").notNull(),
+  low: real("low").notNull(), high: real("high").notNull(), observations: integer("observations").notNull(),
+}, table => [primaryKey({columns:[table.level,table.bucket]})]);
+
 export const marketEra = sqliteTable("market_era", {
   id: integer("id").primaryKey(),
   version: integer("version").notNull(),

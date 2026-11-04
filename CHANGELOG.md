@@ -1,5 +1,12 @@
 # Royal Exchange Online releases
 
+## 0.1.1 — Recorded RXC history correction
+
+- Retain available intraday observations across all four ranges; replace calendar-time targets with extrema-preserving indexed summaries for larger histories.
+- Break both chart strokes and fills at session boundaries and missing observations, preserving genuine flat quotes and all original prices.
+- Add a derived RXC history index without rewriting the source ledger, tick-keyed edge caching and real-clock collection retries without historical simulation.
+- Preserve the existing chart layout, styling, controls and one-way Minecraft integration. See [the cause and validation](HISTORY_INTEGRITY.md).
+
 ## 0.1.0 — Initial GitHub source publication
 
 - Publishes the existing live website source, including the persisted v5 clearing engine, weighted RXC Composite, financial chart presentation and all five market destinations.
